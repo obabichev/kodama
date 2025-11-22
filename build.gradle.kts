@@ -1,22 +1,17 @@
 plugins {
-    kotlin("jvm") version "2.2.21"
-}
-
-group = "com.obabichev"
-version = "1.0-SNAPSHOT"
-
-repositories {
-    mavenCentral()
+    alias(libs.plugins.jvm) apply true
 }
 
 dependencies {
-    testImplementation(kotlin("test"))
 }
 
-kotlin {
-    jvmToolchain(17)
+repositories {
+    mavenLocal()
+    mavenCentral()
 }
 
-tasks.test {
-    useJUnitPlatform()
+subprojects {
+    if (name == "kodama-bom") return@subprojects
+
+    apply(plugin = rootProject.libs.plugins.jvm.get().pluginId)
 }
