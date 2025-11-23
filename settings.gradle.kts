@@ -6,6 +6,7 @@ include("kodama-core")
 include("kodama-tests")
 
 pluginManagement {
+    includeBuild("kodama-compiler-plugin")
     repositories {
         google()
         mavenCentral()
@@ -34,3 +35,4 @@ toolchainManagement {
         }
     }
 }
+

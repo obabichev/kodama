@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm") apply true
+    id("com.obabichev.kodama")
 }
 
 kotlin {

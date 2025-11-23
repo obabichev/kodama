@@ -19,6 +19,9 @@ dependencies {
     api(kotlin("reflect"))
     api(libs.kotlinx.coroutines)
     api(libs.slf4j)
+
+    // TODO move it from the core module
+    api(libs.postgre)
 }
 
 tasks.withType<KotlinCompile>().configureEach {

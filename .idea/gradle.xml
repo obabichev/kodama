@@ -12,6 +12,11 @@
                   <project path="$PROJECT_DIR$/buildSrc" />
                 </projects>
               </build>
+              <build path="$PROJECT_DIR$/kodama-compiler-plugin" name="kodama-compiler-plugin">
+                <projects>
+                  <project path="$PROJECT_DIR$/kodama-compiler-plugin" />
+                </projects>
+              </build>
             </builds>
           </compositeBuild>
         </compositeConfiguration>
@@ -21,6 +26,7 @@
           <set>
             <option value="$PROJECT_DIR$" />
             <option value="$PROJECT_DIR$/buildSrc" />
+            <option value="$PROJECT_DIR$/kodama-compiler-plugin" />
             <option value="$PROJECT_DIR$/kodama-core" />
             <option value="$PROJECT_DIR$/kodama-tests" />
           </set>

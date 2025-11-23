@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="DataSourcePerFileMappings">
+    <file url="file://$PROJECT_DIR$/.idea/queries/Query.sql" value="0e937ca0-0a8a-4443-9662-80aeb82f7ee9" />
+    <file url="file://$PROJECT_DIR$/kodama-tests/src/test/resources/migrations/person.sql" value="0e937ca0-0a8a-4443-9662-80aeb82f7ee9" />
+  </component>
+</project>
