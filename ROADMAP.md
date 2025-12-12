@@ -5,6 +5,29 @@ This roadmap outlines planned features to support the full range of SQL queries 
 
 ---
 
+## Completed Features ✅
+
+### Nullable Column Support
+**Status:** ✅ Implemented (v0.1.0)
+
+Kodama now supports nullable columns with full type safety:
+
+```kotlin
+object Product : Table("product") {
+    val id = integer("id").primaryKey()           // Column<Int>
+    val name = varchar("name", 255)               // Column<String>
+    val description = varchar("description", 500).nullable()  // Column<String?>
+}
+```
+
+**Key features:**
+- `.nullable()` extension changes type from `Column<T>` to `Column<T?>`
+- Result accessors respect nullability: `row.product.description` has type `String?`
+- NULL values from database are properly handled
+- Full compile-time type safety for both nullable and non-nullable columns
+
+---
+
 ## Top Priority Features
 
 ### 1. ORDER BY clause ⭐ Most Common

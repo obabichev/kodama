@@ -27,19 +27,19 @@ abstract class Table(tableName: String) {
     }
 
     /**
-     * Define an integer column
+     * Define an integer column (non-nullable by default)
      */
     protected fun integer(columnName: String): Column<Int> {
-        val column = Column(columnName, relation, IntColumnType)
+        val column = Column(columnName, relation, IntColumnType, nullable = false)
         relation.registerColumn(column)
         return column
     }
 
     /**
-     * Define a varchar column
+     * Define a varchar column (non-nullable by default)
      */
     protected fun varchar(columnName: String, length: Int): Column<String> {
-        val column = Column(columnName, relation, StringColumnType)
+        val column = Column(columnName, relation, StringColumnType, nullable = false)
         relation.registerColumn(column)
         return column
     }
@@ -75,4 +75,16 @@ object Tables {
 fun <T> Column<T>.primaryKey(): Column<T> {
     // TODO: Store primary key metadata
     return this
+}
+
+/**
+ * Extension to mark a column as nullable.
+ * Changes the column type from Column<T> to Column<T?> to reflect nullability in the type system.
+ */
+fun <T : Any> Column<T>.nullable(): Column<T?> {
+    @Suppress("UNCHECKED_CAST")
+    val newColumn = Column(this.name, this.relation, this.type as ColumnType<T?>, nullable = true)
+    // Re-register the column with the relation to replace the old one
+    this.relation.replaceColumn(this, newColumn)
+    return newColumn
 }

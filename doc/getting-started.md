@@ -35,6 +35,7 @@ Tables are defined as Kotlin objects that extend the `Table` base class:
 ```kotlin
 import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.schema.primaryKey
+import com.obabichev.kodama.schema.nullable
 
 object Person : Table("person") {
     val name = varchar("name", 255).primaryKey()
@@ -46,6 +47,7 @@ object Order : Table("order") {
     val userName = varchar("user_name", 255)
     val product = varchar("product", 255)
     val cost = integer("cost")
+    val notes = varchar("notes", 1000).nullable()  // Optional notes - Column<String?>
 }
 ```
 
@@ -117,6 +119,65 @@ withConnection { transaction ->
         // println(row.user.id)  // Won't compile!
     }
 }
+```
+
+## Nullable Columns
+
+Kodama supports nullable columns with full type safety:
+
+### Defining Nullable Columns
+
+Use the `.nullable()` extension to mark columns as optional:
+
+```kotlin
+object Product : Table("product") {
+    val id = integer("id").primaryKey()        // Column<Int> - required
+    val name = varchar("name", 255)            // Column<String> - required
+    val description = varchar("description", 500).nullable()  // Column<String?> - optional
+    val discount = integer("discount").nullable()  // Column<Int?> - optional
+}
+```
+
+### Working with Nullable Values
+
+Nullable columns have nullable types in results:
+
+```kotlin
+withConnection { transaction ->
+    val results = query()
+        .from(Product)
+        .select(Product.all())
+        .execute(transaction)
+
+    results.forEach { row ->
+        val name: String = row.product.name  // Non-nullable
+        val description: String? = row.product.description  // Nullable
+
+        // Handle null values safely
+        if (description != null) {
+            println("Description: $description")
+        } else {
+            println("No description")
+        }
+
+        // Or use safe-call operator
+        println("Description length: ${description?.length ?: 0}")
+    }
+}
+```
+
+### Type Safety
+
+The type system enforces correct nullability:
+
+```kotlin
+// ✅ Correct
+val nonNull: Column<Int> = Product.id
+val nullable: Column<Int?> = Product.discount
+
+// ❌ Won't compile
+val wrong1: Column<Int?> = Product.id  // Type mismatch
+val wrong2: Column<Int> = Product.discount  // Type mismatch
 ```
 
 ## Next Steps
