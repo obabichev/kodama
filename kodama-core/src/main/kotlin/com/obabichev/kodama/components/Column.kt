@@ -22,7 +22,12 @@ class Column<T>(
  * @param TableMarker Phantom type for tracking which table this column belongs to (PersonTable, OrderTable, etc.)
  * @param ColumnMarker Phantom type for tracking which column this is at compile time (Name, Age, etc.)
  */
-class TypedColumn<T, TableMarker, ColumnMarker>(val column: Column<T>) {
+/**
+ * Marker interface for all selection types (columns and all-markers)
+ */
+interface SelectionMarker
+
+class TypedColumn<T, TableMarker, ColumnMarker>(val column: Column<T>) : SelectionMarker {
     val name: String get() = column.name
     val relation: Relation get() = column.relation
     val type: ColumnType<T> get() = column.type

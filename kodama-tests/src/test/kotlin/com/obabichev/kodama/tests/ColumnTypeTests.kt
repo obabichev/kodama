@@ -3,6 +3,7 @@ package com.obabichev.kodama.tests
 import com.obabichev.kodama.components.Column
 import com.obabichev.kodama.tests.schema.Person
 import com.obabichev.kodama.tests.schema.Product
+import com.obabichev.kodama.tests.data.*
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue

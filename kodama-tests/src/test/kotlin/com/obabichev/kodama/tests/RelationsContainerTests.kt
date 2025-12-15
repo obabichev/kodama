@@ -3,6 +3,7 @@ package com.obabichev.kodama.tests
 import com.obabichev.kodama.query.RelationsContainer
 import com.obabichev.kodama.tests.schema.Company
 import com.obabichev.kodama.tests.schema.Person
+import com.obabichev.kodama.tests.data.*
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame

@@ -88,23 +88,37 @@ Provides DSL: `integer()`, `varchar()`, `primaryKey()`
 
 ## Current Features (Implemented)
 
+### Query Building
 - ✅ SELECT queries with type-safe column selection
 - ✅ INNER JOIN with type-safe conditions
 - ✅ Multiple joins (A → B → C)
 - ✅ WHERE clause with `eq` operator
+- ✅ ORDER BY clause with `.asc()` and `.desc()`
 - ✅ Type-safe results (access only selected columns)
 - ✅ Code generation via Gradle plugin
 - ✅ SQL injection prevention (prepared statements)
 - ✅ Column types: `integer()`, `varchar(length)`
+- ✅ Nullable columns with `.nullable()` marker
+
+### Aggregates
+- ✅ Aggregate functions: `count()`, `sum()`, `avg()`, `min()`, `max()`
+- ✅ Named aggregate selections: `select_totalRevenue { sum(order.cost) }`
+- ✅ Automatic GROUP BY when mixing columns + aggregates
+- ✅ Type-safe aggregate result accessors
+
+### Data Manipulation
+- ✅ INSERT statements with compile-time column validation
+  - All columns required as parameters
+  - Nullable columns with `Type?` parameter
+  - Returns `InsertResult` with `rowsAffected` and `generatedKeys`
 
 ## Current Limitations
 
 - Only `eq` operator (no gt, lt, like, etc.)
 - No AND/OR boolean combinations in WHERE
-- No ORDER BY, LIMIT, OFFSET
-- No aggregate functions (COUNT, SUM, etc.)
-- No GROUP BY, HAVING
-- No INSERT, UPDATE, DELETE
+- No LIMIT, OFFSET for pagination
+- No HAVING clause for aggregate filtering
+- No UPDATE, DELETE statements
 - Only INNER JOIN (no LEFT/RIGHT/FULL OUTER)
 
 See `ROADMAP.md` for planned features.
@@ -173,6 +187,56 @@ withConnection { transaction ->
         println("$name is $age years old")
     }
 }
+```
+
+### ORDER BY Query
+```kotlin
+query()
+    .from(Person)
+    .select { +person.all() }
+    .orderBy {
+        person.age.desc()
+        person.name.asc()
+    }
+```
+
+### Aggregate Query
+```kotlin
+query()
+    .from(Order)
+    .select_totalRevenue { sum(order.cost) }
+    .select_orderCount { count(order.id) }
+    .execute(transaction)
+    .forEach { row ->
+        val revenue = row.totalRevenue  // Named accessor!
+        val count = row.orderCount
+        println("Total: $revenue from $count orders")
+    }
+```
+
+### INSERT Statement
+```kotlin
+// All columns required as parameters
+val result = Order.insert(
+    transaction = transaction,
+    id = 1,
+    userName = "kodama",
+    product = "Laptop",
+    cost = 1500
+)
+
+println("Inserted ${result.rowsAffected} row(s)")
+result.generatedKeys["id"]?.let { println("Generated ID: $it") }
+
+// Nullable columns must be explicitly passed
+Product.insert(
+    transaction = transaction,
+    id = 1,
+    name = "Widget",
+    description = null,  // Explicit null required
+    price = 100,
+    discount = null
+)
 ```
 
 ## Important Design Patterns
@@ -293,7 +357,19 @@ Tests use PostgreSQL with test data:
 ## Current State
 
 - Version: 0.1.0 (Alpha)
-- All tests passing (8 tests in QuerySimpleDataClassTests)
-- Documentation complete and simplified
-- Multiple joins working correctly
-- Ready for next feature: ORDER BY + LIMIT/OFFSET (see ROADMAP.md Phase 1)
+- **All tests passing** including:
+  - QuerySimpleDataClassTests (8 tests)
+  - QueryAggregateTests (3 tests)
+  - InsertTests (5 tests)
+  - QueryOrderByTests
+- **Completed Features**:
+  - ✅ SELECT with type-safe column selection
+  - ✅ INNER JOIN with multiple tables
+  - ✅ WHERE with eq operator
+  - ✅ ORDER BY with asc/desc
+  - ✅ Aggregate functions (COUNT, SUM, AVG, MIN, MAX)
+  - ✅ Automatic GROUP BY
+  - ✅ INSERT statements with compile-time validation
+  - ✅ Nullable column support
+- **Documentation updated**: README, ROADMAP, getting-started, code-generation
+- **Ready for next features**: LIMIT/OFFSET, HAVING, AND/OR combinations (see ROADMAP.md Phase 4)

@@ -1,10 +1,13 @@
 package com.obabichev.kodama.execute
 
 import com.obabichev.kodama.components.ColumnType
+import com.obabichev.kodama.insert.InsertResult
+import com.obabichev.kodama.insert.InsertStatement
 import com.obabichev.kodama.query.Query
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.ResultSet
+import java.sql.Statement
 import kotlin.reflect.KClass
 import kotlin.reflect.full.primaryConstructor
 
@@ -40,6 +43,53 @@ class JdbcTransaction(
     fun executeUpdate(sql: String): Int {
         val statement = connection.createStatement()
         return statement.executeUpdate(sql)
+    }
+
+    /**
+     * Execute an INSERT statement and return the result with generated keys.
+     *
+     * @param insert The INSERT statement to execute
+     * @return InsertResult with rows affected and any generated keys
+     */
+    fun executeInsert(insert: InsertStatement): InsertResult {
+        val (sql, values) = insert.sql()
+
+        // Prepare statement with RETURN_GENERATED_KEYS to capture auto-generated IDs
+        val preparedStatement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)
+
+        // Set parameter values
+        values.forEachIndexed { index, value ->
+            val column = insert.columns[index]
+            @Suppress("UNCHECKED_CAST")
+            val columnType = column.type as ColumnType<Any?>
+            columnType.setValue(preparedStatement, index + 1, value)
+        }
+
+        // Execute the insert
+        val rowsAffected = preparedStatement.executeUpdate()
+
+        // Retrieve generated keys (if any)
+        val generatedKeys = mutableMapOf<String, Any>()
+        val generatedKeysResultSet = preparedStatement.generatedKeys
+        if (generatedKeysResultSet.next()) {
+            // Try to map generated keys back to column names
+            // Note: Some JDBC drivers return column names, others return positions
+            val metaData = generatedKeysResultSet.metaData
+            for (i in 1..metaData.columnCount) {
+                val columnName = metaData.getColumnName(i)
+                val value = generatedKeysResultSet.getObject(i)
+                if (value != null) {
+                    generatedKeys[columnName] = value
+                }
+            }
+        }
+
+        preparedStatement.close()
+
+        return InsertResult(
+            rowsAffected = rowsAffected,
+            generatedKeys = generatedKeys
+        )
     }
 
     override fun rollback() {

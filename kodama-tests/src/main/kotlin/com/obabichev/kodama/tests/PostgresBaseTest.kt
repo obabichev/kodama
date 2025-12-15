@@ -33,10 +33,17 @@ open class PostgresBaseTest {
     @BeforeTest
     fun before() {
         withConnection {
+            // Drop and recreate tables to ensure clean schema
+            executeUpdate("drop table if exists profile")
+            executeUpdate("drop table if exists \"order\"")
+            executeUpdate("drop table if exists person")
+            executeUpdate("drop table if exists company")
+            executeUpdate("drop table if exists product")
+
             // Create person table
             executeUpdate(
                 """
-                create table if not exists person
+                create table person
                 (
                     name text primary key not null,
                     age  integer          not null
@@ -47,7 +54,7 @@ open class PostgresBaseTest {
             // Create order table (note: "order" is a reserved keyword in SQL, so we use quotes)
             executeUpdate(
                 """
-                create table if not exists "order"
+                create table "order"
                 (
                     id       integer primary key not null,
                     user_name  text             not null,
@@ -60,11 +67,11 @@ open class PostgresBaseTest {
             // Create profile table
             executeUpdate(
                 """
-                create table if not exists profile
+                create table profile
                 (
                     user_name text not null,
                     contact   text not null,
-                    photo     text not null
+                    photo     text
                 )
                 """.trimIndent()
             )
@@ -72,7 +79,7 @@ open class PostgresBaseTest {
             // Create company table
             executeUpdate(
                 """
-                create table if not exists company
+                create table company
                 (
                     id           integer primary key not null,
                     company_name text                not null
@@ -83,7 +90,7 @@ open class PostgresBaseTest {
             // Create product table with nullable columns
             executeUpdate(
                 """
-                create table if not exists product
+                create table product
                 (
                     id          integer primary key not null,
                     name        text                not null,
@@ -93,13 +100,6 @@ open class PostgresBaseTest {
                 )
                 """.trimIndent()
             )
-
-            // Clear existing data
-            executeUpdate("delete from person")
-            executeUpdate("""delete from "order"""")
-            executeUpdate("delete from profile")
-            executeUpdate("delete from company")
-            executeUpdate("delete from product")
 
             // Insert test data for person
             executeUpdate("insert into person values ('kodama', 1)")

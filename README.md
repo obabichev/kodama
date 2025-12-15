@@ -179,6 +179,74 @@ INNER JOIN orders ON orders.user_id = users.id
 INNER JOIN payments ON payments.order_id = orders.id
 ```
 
+### ORDER BY
+
+```kotlin
+query()
+    .from(User)
+    .select { +user.email }
+    .orderBy {
+        user.age.desc()
+        user.email.asc()
+    }
+```
+
+**Generates:**
+```sql
+SELECT email FROM users ORDER BY age DESC, email ASC
+```
+
+### Aggregates
+
+```kotlin
+query()
+    .from(Order)
+    .select_totalRevenue { sum(order.cost) }
+    .select_orderCount { count(order.id) }
+    .execute(transaction)
+
+// Results have type-safe named accessors
+results.forEach { row ->
+    val total: Number = row.totalRevenue  // Named accessor!
+    val count: Number = row.orderCount
+}
+```
+
+**Generates:**
+```sql
+SELECT SUM(cost) AS totalRevenue, COUNT(id) AS orderCount FROM orders
+```
+
+### INSERT Statements
+
+```kotlin
+// All columns required as parameters for compile-time safety
+val result = Order.insert(
+    transaction = transaction,
+    id = 1,
+    userId = 100,
+    product = "Laptop",
+    cost = 1500
+)
+
+println("Inserted ${result.rowsAffected} row(s)")
+result.generatedKeys["id"]?.let { println("Generated ID: $it") }
+
+// Nullable columns
+Product.insert(
+    transaction = transaction,
+    id = 1,
+    name = "Widget",
+    description = null,  // Must explicitly pass null
+    price = 100
+)
+```
+
+**Generates:**
+```sql
+INSERT INTO "order" (id, user_id, product, cost) VALUES (?, ?, ?, ?)
+```
+
 ## Documentation
 
 📚 **[Full Documentation](doc/README.md)**
@@ -212,17 +280,46 @@ Kodama is built on these core principles:
 | Fluent DSL | ✅ Yes | ✅ Yes | ✅ Yes | ⚠️ Limited |
 | Code generation | ✅ Gradle | ❌ No | ✅ Maven/Gradle | ❌ No |
 
-## Project Status
+## Current Features
 
 **Version**: 0.1.0 (Alpha)
 
-Kodama is in active development. The API is stabilizing but may change as we add features.
+### Query Building ✅
+- **SELECT** - Type-safe column selection
+- **FROM** - Single table queries
+- **INNER JOIN** - Multiple table queries with type-safe conditions
+- **WHERE** - Filter with `eq` operator
+- **ORDER BY** - Sort results with `.asc()` and `.desc()`
+- **Multiple Joins** - Chain joins across 3+ tables
 
-- ✅ Core features - Stable
-- ✅ Type system - Stable
-- ✅ Code generation - Stable
-- 🚧 Additional operators - In progress
-- 📋 Write operations - Planned
+### Data Manipulation ✅
+- **INSERT** - Type-safe inserts with compile-time column validation
+  - All columns required as parameters
+  - Nullable column support
+  - Returns InsertResult with generated keys
+
+### Aggregates ✅
+- **Aggregate Functions** - `count()`, `sum()`, `avg()`, `min()`, `max()`
+- **Named Aggregates** - Type-safe aggregate aliases with method-based selection
+- **GROUP BY** - Automatic GROUP BY for mixed column + aggregate queries
+- **Type-Safe Results** - Compile-time safe aggregate result access
+
+### Type System ✅
+- **Nullable Columns** - Full support with `Column<T?>` type
+- **Compile-Time Safety** - Only access what you selected
+- **Type-Safe Results** - Result types match selections exactly
+
+### In Progress 🚧
+- Additional WHERE operators (gt, lt, like, etc.)
+- AND/OR boolean combinations
+- LIMIT and OFFSET
+
+### Planned 📋
+- UPDATE and DELETE statements
+- LEFT/RIGHT/FULL OUTER JOINs
+- DISTINCT
+- IN operator and subqueries
+- Window functions
 
 ## Requirements
 
@@ -230,17 +327,6 @@ Kodama is in active development. The API is stabilizing but may change as we add
 - Gradle 8.0+
 - PostgreSQL 12+
 - JVM 17+
-
-## Roadmap
-
-See [ROADMAP.md](ROADMAP.md) for detailed plans.
-
-**Upcoming releases:**
-
-- **v0.2.0** - ORDER BY, LIMIT, OFFSET, more operators
-- **v0.3.0** - Aggregates, GROUP BY, HAVING
-- **v0.4.0** - INSERT, UPDATE, DELETE
-- **v1.0.0** - Production-ready with full PostgreSQL support
 
 ## Contributing
 

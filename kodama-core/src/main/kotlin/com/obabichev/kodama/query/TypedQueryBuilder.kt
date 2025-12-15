@@ -15,6 +15,8 @@ sealed interface SelectionMarker {
     val columns: List<Column<*>>
     val table: Table?
     val isTableAll: Boolean
+    val isAggregate: Boolean
+        get() = false
 }
 
 /**
@@ -36,6 +38,22 @@ data class ColumnSelection(
     override val columns: List<Column<*>> = listOf(column)
     override val table: Table? = null
     override val isTableAll: Boolean = false
+}
+
+/**
+ * Marker for selecting an aggregate function
+ */
+data class AggregateSelection(
+    val aggregateFunction: AggregateFunction<*>
+) : SelectionMarker {
+    override val columns: List<Column<*>> = if (aggregateFunction.column != null) {
+        listOf(aggregateFunction.column)
+    } else {
+        emptyList() // For COUNT(*)
+    }
+    override val table: Table? = null
+    override val isTableAll: Boolean = false
+    override val isAggregate: Boolean = true
 }
 
 /**
@@ -63,6 +81,7 @@ class TableAccessor(
 /**
  * Context for building SELECT clause with type-safe column access
  * Supports unary plus operator to add columns: +person.name
+ * Also supports aggregate functions without unary plus: sum(order.cost)
  */
 abstract class SelectContext {
     val selections = mutableListOf<SelectionMarker>()
@@ -87,6 +106,71 @@ abstract class SelectContext {
     operator fun TableAllSelection.unaryPlus() {
         selections.add(this)
     }
+
+    /**
+     * Add aggregate function directly (no unary plus needed)
+     */
+    fun <T> AggregateFunction<T>.also(block: AggregateFunction<T>.() -> Unit = {}): AggregateFunction<T> {
+        selections.add(AggregateSelection(this))
+        return this
+    }
+
+    // DSL functions for aggregate functions
+    fun <T : Number> sum(column: Column<T>): AggregateFunction<T> {
+        val agg = Sum(column)
+        selections.add(AggregateSelection(agg))
+        return agg
+    }
+
+    fun <T : Number, TM, CM> sum(typedColumn: TypedColumn<T, TM, CM>): AggregateFunction<T> {
+        return sum(typedColumn.column)
+    }
+
+    fun count(column: Column<*>): AggregateFunction<Long> {
+        val agg = Count(column)
+        selections.add(AggregateSelection(agg))
+        return agg
+    }
+
+    fun <TM, CM> count(typedColumn: TypedColumn<*, TM, CM>): AggregateFunction<Long> {
+        return count(typedColumn.column)
+    }
+
+    fun countAll(): AggregateFunction<Long> {
+        val agg = Count(null)
+        selections.add(AggregateSelection(agg))
+        return agg
+    }
+
+    fun <T : Number> avg(column: Column<T>): AggregateFunction<Double> {
+        val agg = Avg(column)
+        selections.add(AggregateSelection(agg))
+        return agg
+    }
+
+    fun <T : Number, TM, CM> avg(typedColumn: TypedColumn<T, TM, CM>): AggregateFunction<Double> {
+        return avg(typedColumn.column)
+    }
+
+    fun <T : Comparable<T>> min(column: Column<T>): AggregateFunction<T> {
+        val agg = Min(column)
+        selections.add(AggregateSelection(agg))
+        return agg
+    }
+
+    fun <T : Comparable<T>, TM, CM> min(typedColumn: TypedColumn<T, TM, CM>): AggregateFunction<T> {
+        return min(typedColumn.column)
+    }
+
+    fun <T : Comparable<T>> max(column: Column<T>): AggregateFunction<T> {
+        val agg = Max(column)
+        selections.add(AggregateSelection(agg))
+        return agg
+    }
+
+    fun <T : Comparable<T>, TM, CM> max(typedColumn: TypedColumn<T, TM, CM>): AggregateFunction<T> {
+        return max(typedColumn.column)
+    }
 }
 
 /**
@@ -97,6 +181,9 @@ class QueryState {
     val _joins: MutableList<Join> = mutableListOf()
     val _selectedColumns: MutableList<Column<*>> = mutableListOf()
     val _tableAllSelections: MutableSet<Table> = mutableSetOf()
+    val _aggregateSelections: MutableList<AggregateFunction<*>> = mutableListOf()
+    val _selectables: MutableList<Selectable> = mutableListOf()  // NEW: Unified selection tracking
+    val _groupBy: MutableList<Column<*>> = mutableListOf()  // GROUP BY columns
     var whereExpression: Expression? = null
     val _orderBy: MutableList<OrderByClause> = mutableListOf()
     val relations = RelationsContainer()
@@ -111,6 +198,9 @@ class QueryState {
             if (table != null) {
                 _tableAllSelections.add(table)
             }
+        }
+        if (marker.isAggregate && marker is AggregateSelection) {
+            _aggregateSelections.add(marker.aggregateFunction)
         }
     }
 
@@ -150,11 +240,30 @@ interface AfterFromQueryBuilderBase<Sel> {
      * Build the query - requires calling select first through generated extension
      */
     fun build(): Query {
-        if (state._selectedColumns.isEmpty()) {
+        if (state._selectedColumns.isEmpty() && state._aggregateSelections.isEmpty()) {
             throw IllegalStateException("SELECT clause is required. Call select() at least once.")
         }
         val from = state._from ?: throw IllegalStateException("FROM clause is required.")
-        return Query(state._selectedColumns.toList(), from, state._joins.toList(), state.whereExpression, state._orderBy.toList(), state.relations)
+
+        // When mixing columns with aggregates, automatically add selected columns to GROUP BY
+        val groupBy = if (state._aggregateSelections.isNotEmpty() && state._selectedColumns.isNotEmpty()) {
+            // Auto-populate GROUP BY with selected columns
+            state._selectedColumns.toList()
+        } else {
+            // No aggregates, or aggregates-only query (no columns to group by)
+            state._groupBy.toList()
+        }
+
+        return Query(
+            state._selectedColumns.toList(),
+            from,
+            state._joins.toList(),
+            state.whereExpression,
+            state._orderBy.toList(),
+            state.relations,
+            state._aggregateSelections.toList(),
+            groupBy
+        )
     }
 }
 
