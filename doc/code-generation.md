@@ -10,8 +10,9 @@ Kodama uses Gradle-based code generation to create type-safe query builders and 
 
 ```kotlin
 object Person : Table("person") {
-    val name = varchar("name", 255)
-    val age = integer("age")
+    val name = varchar("name", 255)           // Column<String>
+    val age = integer("age")                  // Column<Int>
+    val bio = varchar("bio", 500).nullable()  // Column<String?>
 }
 ```
 
@@ -168,6 +169,29 @@ For each query, generates all prefixes:
 ```
 
 This ensures all intermediate builders exist for type-safe chaining.
+
+### Nullability Tracking
+
+Generator extracts nullability information from table definitions:
+
+```kotlin
+// Scans for .nullable() calls
+val propertyPattern = """val\s+(\w+)\s*=\s*(varchar|integer|...)\s*\([^)]*\)([^\n]*)""".toRegex()
+
+// Checks if column is marked nullable
+val isNullable = modifiers.contains(".nullable()")
+```
+
+Generated result accessors respect nullability:
+
+```kotlin
+// For: val description = varchar("description", 500).nullable()
+// Generates:
+class ProductResultAccessor_All(...) {
+    val id: Int             // Non-nullable
+    val description: String?  // Nullable - matches Column<String?> type
+}
+```
 
 ## Generated File Location
 

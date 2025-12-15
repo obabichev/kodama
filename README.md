@@ -12,6 +12,7 @@
 - **💎 Fluent DSL** - Natural, readable query syntax
 - **🎯 PostgreSQL Optimized** - Designed specifically for PostgreSQL
 - **📦 Lightweight** - Minimal dependencies, focused on core functionality
+- **✨ Nullable Types** - Full nullability support with `Column<T?>` for optional columns
 
 ## Quick Start
 
@@ -34,11 +35,13 @@ dependencies {
 ```kotlin
 import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.schema.primaryKey
+import com.obabichev.kodama.schema.nullable
 
 object User : Table("users") {
     val id = integer("id").primaryKey()
     val email = varchar("email", 255)
     val age = integer("age")
+    val bio = varchar("bio", 500).nullable()  // Optional column - Column<String?>
 }
 
 object Order : Table("orders") {

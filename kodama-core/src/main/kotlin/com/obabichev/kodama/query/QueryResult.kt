@@ -7,10 +7,14 @@ import java.sql.ResultSet
 /**
  * Base interface for query results.
  * Query results provide type-safe access to selected columns only.
+ *
+ * Use table accessors (row.person, row.order) to access columns in a type-safe way.
+ * Table accessors are only available when .all() was selected for that table.
  */
 interface QueryResult {
     val resultSet: ResultSet
     val relations: RelationsContainer
+    val selectedColumns: List<Column<*>>
 }
 
 /**
@@ -63,13 +67,22 @@ abstract class TableResultAccessor(
     protected val relations: RelationsContainer,
     protected val selectedColumns: List<Column<*>>
 ) {
-    protected fun <T> readColumn(column: Column<T>): T {
+    protected fun <T> readColumn(column: Column<T>): T? {
         val columnIndex = selectedColumns.indexOfFirst { it.name == column.name && it.relation == column.relation }
         if (columnIndex == -1) {
             throw IllegalStateException("Column ${column.name} from table ${column.relation.name} was not selected in the query")
         }
+
+        val jdbcIndex = columnIndex + 1
+
+        // Check if the value is NULL in the database
+        val value = resultSet.getObject(jdbcIndex)
+        if (value == null) {
+            return null
+        }
+
         @Suppress("UNCHECKED_CAST")
         val columnType = column.type as ColumnType<T>
-        return columnType.readValue(resultSet, columnIndex + 1)
+        return columnType.readValue(resultSet, jdbcIndex)
     }
 }

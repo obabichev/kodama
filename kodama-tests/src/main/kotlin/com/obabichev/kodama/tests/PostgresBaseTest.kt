@@ -80,11 +80,26 @@ open class PostgresBaseTest {
                 """.trimIndent()
             )
 
+            // Create product table with nullable columns
+            executeUpdate(
+                """
+                create table if not exists product
+                (
+                    id          integer primary key not null,
+                    name        text                not null,
+                    description text,
+                    price       integer             not null,
+                    discount    integer
+                )
+                """.trimIndent()
+            )
+
             // Clear existing data
             executeUpdate("delete from person")
             executeUpdate("""delete from "order"""")
             executeUpdate("delete from profile")
             executeUpdate("delete from company")
+            executeUpdate("delete from product")
 
             // Insert test data for person
             executeUpdate("insert into person values ('kodama', 1)")
@@ -105,6 +120,12 @@ open class PostgresBaseTest {
             executeUpdate("insert into company values (1, 'Acme Corp')")
             executeUpdate("insert into company values (2, 'Tech Solutions')")
             executeUpdate("insert into company values (3, 'Global Industries')")
+
+            // Insert test data for product with both null and non-null values
+            executeUpdate("insert into product values (1, 'Laptop', 'High-performance laptop', 1500, 10)")
+            executeUpdate("insert into product values (2, 'Mouse', NULL, 50, NULL)")  // NULL description and discount
+            executeUpdate("insert into product values (3, 'Keyboard', 'Mechanical keyboard', 120, NULL)")  // NULL discount only
+            executeUpdate("insert into product values (4, 'Monitor', NULL, 300, 15)")  // NULL description only
         }
     }
 }

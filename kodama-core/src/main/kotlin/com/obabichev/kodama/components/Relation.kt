@@ -10,5 +10,14 @@ class Relation(val name: String) {
     fun registerColumn(column: Column<*>) {
         _columns.add(column)
     }
+
+    fun replaceColumn(oldColumn: Column<*>, newColumn: Column<*>) {
+        val index = _columns.indexOf(oldColumn)
+        if (index != -1) {
+            _columns[index] = newColumn
+        } else {
+            _columns.add(newColumn)
+        }
+    }
 }
 

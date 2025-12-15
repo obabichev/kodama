@@ -10,16 +10,17 @@ class Query(
     val from: Relation,
     val joins: List<Join>,
     val whereExpression: Expression?,
+    val orderBy: List<OrderByClause>,
     val relations: RelationsContainer
 ) {
     fun sql(): String {
         val tableName = from.name
         val columns = select
-            .map { it.name }
+            .map { "\"${it.relation.name}\".${it.name}" }
             .joinToString(", ")
 
         val baseQuery = buildString {
-            append("SELECT $columns FROM $tableName")
+            append("SELECT $columns FROM \"$tableName\"")
 
             // Add JOIN clauses
             joins.forEach { join ->
@@ -34,10 +35,17 @@ class Query(
             }
         }
 
-        return if (whereExpression != null) {
+        val queryWithWhere = if (whereExpression != null) {
             "$baseQuery WHERE ${whereExpression.toSql()}"
         } else {
             baseQuery
+        }
+
+        return if (orderBy.isNotEmpty()) {
+            val orderByClause = orderBy.joinToString(", ") { "\"${it.column.relation.name}\".${it.column.name} ${it.direction.toSql()}" }
+            "$queryWithWhere ORDER BY $orderByClause"
+        } else {
+            queryWithWhere
         }
     }
 
