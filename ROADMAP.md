@@ -7,10 +7,10 @@ This roadmap outlines planned features to support the full range of SQL queries 
 
 ## Completed Features ✅
 
-### Nullable Column Support
+### 1. Nullable Column Support
 **Status:** ✅ Implemented (v0.1.0)
 
-Kodama now supports nullable columns with full type safety:
+Kodama supports nullable columns with full type safety:
 
 ```kotlin
 object Product : Table("product") {
@@ -26,23 +26,12 @@ object Product : Table("product") {
 - NULL values from database are properly handled
 - Full compile-time type safety for both nullable and non-nullable columns
 
----
+### 2. ORDER BY Clause
+**Status:** ✅ Implemented (v0.1.0)
 
-## Top Priority Features
+Sort query results with type-safe column references:
 
-### 1. ORDER BY clause ⭐ Most Common
-Almost every query needs sorting. Essential for pagination and user-facing lists.
-
-**Status:** Not implemented
-
-**Example Usage:**
 ```kotlin
-query()
-    .from(Person)
-    .select { +person.all() }
-    .orderBy { person.age.desc() }
-
-// Multiple columns
 query()
     .from(Person)
     .select { +person.all() }
@@ -52,16 +41,95 @@ query()
     }
 ```
 
-**Implementation Tasks:**
-- Add `orderBy` method to query builders
-- Support `.asc()` and `.desc()` column modifiers
-- Update Query class to track ORDER BY clause
-- Update SQL generation to append ORDER BY
-- Add tests for single and multiple column ordering
+**Key features:**
+- `.asc()` and `.desc()` modifiers on columns
+- Multiple column sorting
+- Type-safe column references
+- Automatic SQL ORDER BY generation
+
+### 3. Aggregate Functions (COUNT, SUM, AVG, MIN, MAX)
+**Status:** ✅ Implemented (v0.1.0)
+
+Type-safe aggregate functions with named accessors:
+
+```kotlin
+query()
+    .from(Order)
+    .select_totalRevenue { sum(order.cost) }
+    .select_orderCount { count(order.id) }
+    .execute(transaction)
+
+// Results have compile-time safe named accessors
+results.forEach { row ->
+    val revenue: Number = row.totalRevenue
+    val count: Number = row.orderCount
+}
+```
+
+**Key features:**
+- All standard aggregate functions: `count()`, `sum()`, `avg()`, `min()`, `max()`
+- Method-based selection with automatic alias inference
+- Type-safe result accessors
+- Compile-time safety - only access selected aggregates
+
+### 4. GROUP BY (Automatic)
+**Status:** ✅ Implemented (v0.1.0)
+
+When mixing columns with aggregates, GROUP BY is automatically added:
+
+```kotlin
+query()
+    .from(Order)
+    .select { order.userName }
+    .select_orderCount { count(order.id) }
+    .execute(transaction)
+
+// Automatically generates: SELECT user_name, COUNT(id) FROM orders GROUP BY user_name
+```
+
+**Key features:**
+- Automatic GROUP BY generation when mixing columns + aggregates
+- Type-safe mixed queries
+- No manual GROUP BY specification needed
+
+### 5. INSERT Statements
+**Status:** ✅ Implemented (v0.1.0)
+
+Type-safe INSERT operations with compile-time column validation:
+
+```kotlin
+// All columns are required parameters
+val result = Order.insert(
+    transaction = transaction,
+    id = 100,
+    userName = "user",
+    product = "Laptop",
+    cost = 1500
+)
+
+// Nullable columns must be explicitly passed
+Product.insert(
+    transaction = transaction,
+    id = 1,
+    name = "Widget",
+    description = null,  // Explicit null required
+    price = 100,
+    discount = null
+)
+```
+
+**Key features:**
+- Generated extension methods on table objects
+- All columns required as parameters (forces code review on schema changes)
+- Nullable columns have `Type?` parameter
+- Returns `InsertResult` with `rowsAffected` and `generatedKeys`
+- Proper NULL handling with `PreparedStatement.setNull()`
 
 ---
 
-### 2. LIMIT and OFFSET (Pagination) ⭐ Critical
+## Top Priority Features
+
+### 1. LIMIT and OFFSET (Pagination) ⭐ Critical
 Critical for performance and pagination. Used in virtually every application.
 
 **Status:** Not implemented
@@ -94,8 +162,8 @@ query()
 
 ---
 
-### 3. Aggregate Functions (COUNT, SUM, AVG, MIN, MAX) ⭐ Very Common
-Very common for analytics, dashboards, and reporting.
+### 2. HAVING Clause
+Filter aggregate results (works with GROUP BY).
 
 **Status:** Not implemented
 
@@ -103,76 +171,22 @@ Very common for analytics, dashboards, and reporting.
 ```kotlin
 query()
     .from(Order)
-    .select {
-        +count(order.id)
-        +sum(order.cost)
-        +avg(order.cost)
-        +min(order.cost)
-        +max(order.cost)
-    }
-
-// With alias
-query()
-    .from(Order)
-    .select {
-        +count(order.id).alias("total_orders")
-        +sum(order.cost).alias("total_revenue")
-    }
-```
-
-**Implementation Tasks:**
-- Create aggregate function DSL: `count()`, `sum()`, `avg()`, `min()`, `max()`
-- Support column expressions in aggregates
-- Handle result type mapping for aggregates
-- Support optional aliases
-- Update SQL generation
-- Add tests for all aggregate functions
-
----
-
-### 4. GROUP BY and HAVING
-Required whenever using aggregates with grouping.
-
-**Status:** Not implemented
-
-**Example Usage:**
-```kotlin
-query()
-    .from(Order)
-    .select {
-        +order.userName
-        +count(order.id).alias("order_count")
-    }
-    .groupBy { order.userName }
+    .select { order.userName }
+    .select_orderCount { count(order.id) }
     .having { count(order.id) gt 5 }
-
-// Multiple columns
-query()
-    .from(Order)
-    .select {
-        +order.userName
-        +order.product
-        +sum(order.cost)
-    }
-    .groupBy {
-        order.userName
-        order.product
-    }
 ```
 
 **Implementation Tasks:**
-- Add `groupBy` method to query builders
 - Add `having` method to query builders
-- Support multiple GROUP BY columns
 - Support aggregate functions in HAVING clause
 - Update SQL generation
-- Add tests for grouping and filtering
+- Add tests for HAVING with aggregates
 
 ---
 
 ## Secondary Priority Features
 
-### 5. LEFT/RIGHT/FULL OUTER JOIN
+### 3. LEFT/RIGHT/FULL OUTER JOIN
 You already have INNER join, but outer joins are very common for optional relationships.
 
 **Status:** Partially implemented (INNER JOIN only)
@@ -204,7 +218,7 @@ query()
 
 ---
 
-### 6. DISTINCT
+### 4. DISTINCT
 Removing duplicates is frequently needed.
 
 **Status:** Not implemented
@@ -234,7 +248,7 @@ query()
 
 ---
 
-### 7. IN operator and subqueries
+### 5. IN operator and subqueries
 **Status:** Not implemented
 
 **Example Usage:**
@@ -274,7 +288,7 @@ query()
 
 ---
 
-### 8. More comparison operators
+### 6. More comparison operators
 **Status:** Partially implemented (only `eq` exists)
 
 **Example Usage:**
@@ -310,30 +324,13 @@ where { person.age.between(18, 65) }
 
 ---
 
-### 9. INSERT, UPDATE, DELETE statements
-Currently you only have SELECT. Most ORMs need full CRUD.
+### 7. UPDATE and DELETE statements
+Complete CRUD support with UPDATE and DELETE operations.
 
-**Status:** Not implemented
+**Status:** Not implemented (INSERT is complete)
 
 **Example Usage:**
 ```kotlin
-// INSERT
-insert(Person)
-    .values {
-        person.name = "new_user"
-        person.age = 25
-    }
-    .execute(transaction)
-
-// INSERT with returning
-insert(Person)
-    .values {
-        person.name = "new_user"
-        person.age = 25
-    }
-    .returning { +person.name }
-    .execute(transaction)
-
 // UPDATE
 update(Person)
     .set {
@@ -349,16 +346,15 @@ delete(Person)
 ```
 
 **Implementation Tasks:**
-- Create INSERT builder with type-safe value assignment
 - Create UPDATE builder with type-safe set operations
 - Create DELETE builder
 - Support RETURNING clause (PostgreSQL specific)
 - Handle transaction management
-- Add comprehensive CRUD tests
+- Add comprehensive tests
 
 ---
 
-### 10. AND/OR boolean combinations in WHERE
+### 8. AND/OR boolean combinations in WHERE
 **Status:** Not implemented
 
 **Example Usage:**
@@ -431,33 +427,43 @@ Cache compiled queries for performance.
 
 ## Recommended Implementation Order
 
-**Phase 1: Essential Query Features (Weeks 1-2)**
-1. ORDER BY clause
-2. LIMIT and OFFSET
-3. More comparison operators (gt, lt, gte, lte, neq, isNull, isNotNull)
-4. AND/OR boolean combinations
+**✅ Phase 1: Core Query Features (COMPLETED)**
+1. ✅ SELECT queries with type-safe column selection
+2. ✅ INNER JOIN with multiple table support
+3. ✅ WHERE clause with eq operator
+4. ✅ ORDER BY clause with asc/desc
+5. ✅ Nullable column support
 
-**Phase 2: Analytics Support (Weeks 3-4)**
-5. Aggregate functions (COUNT, SUM, AVG, MIN, MAX)
-6. GROUP BY and HAVING
-7. DISTINCT
+**✅ Phase 2: Analytics Support (COMPLETED)**
+6. ✅ Aggregate functions (COUNT, SUM, AVG, MIN, MAX)
+7. ✅ Automatic GROUP BY for mixed column + aggregate queries
+8. ✅ Type-safe named aggregate accessors
 
-**Phase 3: Advanced Queries (Weeks 5-6)**
-8. IN operator and subqueries
-9. LEFT/RIGHT/FULL OUTER JOIN
-10. Additional string operators (LIKE, ILIKE)
+**✅ Phase 3: Data Manipulation - Part 1 (COMPLETED)**
+9. ✅ INSERT statements with compile-time column validation
 
-**Phase 4: Write Operations (Weeks 7-8)**
-11. INSERT statements
-12. UPDATE statements
-13. DELETE statements
-14. RETURNING clause support
+**🚧 Phase 4: Essential Query Features (IN PROGRESS)**
+10. LIMIT and OFFSET (pagination)
+11. HAVING clause for aggregate filtering
+12. AND/OR boolean combinations in WHERE
+13. More comparison operators (gt, lt, gte, lte, neq, isNull, isNotNull)
 
-**Phase 5: Advanced Features (Weeks 9+)**
-15. Window functions
-16. CTEs
-17. CASE expressions
-18. PostgreSQL-specific features (JSON, arrays)
+**📋 Phase 5: Advanced Queries (PLANNED)**
+14. IN operator and subqueries
+15. LEFT/RIGHT/FULL OUTER JOIN
+16. DISTINCT
+17. Additional string operators (LIKE, ILIKE)
+
+**📋 Phase 6: Data Manipulation - Part 2 (PLANNED)**
+18. UPDATE statements
+19. DELETE statements
+20. RETURNING clause support
+
+**📋 Phase 7: Advanced Features (FUTURE)**
+21. Window functions
+22. CTEs (WITH clause)
+23. CASE expressions
+24. PostgreSQL-specific features (JSON, arrays)
 
 ---
 

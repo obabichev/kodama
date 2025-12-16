@@ -2,6 +2,7 @@ package com.obabichev.kodama.query
 
 import com.obabichev.kodama.components.Column
 import com.obabichev.kodama.components.Relation
+import com.obabichev.kodama.components.TypedColumn
 import com.obabichev.kodama.schema.Table
 
 /**
@@ -25,6 +26,13 @@ class RelationsContainer {
      */
     fun <T> column(column: Column<T>): Column<T> {
         return column
+    }
+
+    /**
+     * Get a column from a TypedColumn (unwraps the underlying Column)
+     */
+    fun <T, TM, CM> column(typedColumn: TypedColumn<T, TM, CM>): Column<T> {
+        return typedColumn.column
     }
 
     /**

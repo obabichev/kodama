@@ -16,7 +16,7 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
         val queryBuilder = query()
             .from(Person)
             .join(Order) { order.userName eq person.name }
-            .select(Person.all())
+            .selectAll(Person)
             .where {
                 person.name eq "kodama"
             }
@@ -35,7 +35,7 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
     fun test2_selectOnlyNoJoin() {
         val queryBuilder = query()
             .from(Person)
-            .select(Person.all())
+            .selectAll(Person)
             .where {
                 person.name eq "kodama"
             }
@@ -58,8 +58,8 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
             .join(Order) {
                 order.userName eq person.name
             }
-            .select(Person.all())
-            .select(Order.all())
+            .selectAll(Person)
+            .selectAll(Order)
             .where {
                 person.name eq "kodama"
             }
@@ -83,24 +83,19 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
                 .join(Order) {
                     order.userName eq person.name
                 }
-                .select(Person.Name)   // Select person name only
-                .select(Order.Id)
-                .select(Order.Product)  // Select order id and product
+                .selectAll(Person)  // Select all person columns
+                .selectAll(Order)   // Select all order columns
                 .where {
                     person.name eq "kodama"
                 }
                 .execute(this)
             val row = results.first()
 
-            // ✅ Can access the specific accessors
+            // ✅ Can access all columns via table accessors
             assertEquals("kodama", row.person.name)
-//            assertEquals(1, row.person.age)
+            assertEquals(1, row.person.age)
             assertEquals(1, row.order.id)
             assertEquals("Laptop", row.order.product)
-
-            // ❌ Accessing other accessors would NOT compile:
-            // row.person - compile error
-            // row.order - compile error
         }
     }
 
@@ -112,8 +107,8 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
                 .join(Order, type = JoinType.INNER) {
                     order.userName eq person.name
                 }
-                .select(Person.all())
-                .select(Order.all())
+                .selectAll(Person)
+                .selectAll(Order)
                 .where {
                     person.name eq "kodama"
                 }
@@ -134,8 +129,8 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
             .join(Order) {
                 order.userName eq person.name
             }
-            .select(Person.all())
-            .select(Order.all())
+            .selectAll(Person)
+            .selectAll(Order)
             .where {
                 person.name eq "kodama"
             }
@@ -156,7 +151,7 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
     fun test7_selectFromProfile() {
         val queryBuilder = query()
             .from(Profile)
-            .select(Profile.all())
+            .selectAll(Profile)
             .where {
                 profile.userName eq "kodama"
             }
@@ -178,9 +173,9 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
             .from(Person)
             .join(Order) { order.userName eq person.name }
             .join(Profile) { profile.userName eq person.name }
-            .select(Person.all())
-            .select(Order.all())
-            .select(Profile.all())
+            .selectAll(Person)
+            .selectAll(Order)
+            .selectAll(Profile)
             .where {
                 person.name eq "kodama"
             }

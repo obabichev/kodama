@@ -21,7 +21,11 @@ class KodamaGradlePlugin : Plugin<Project> {
                 val generatedDir = File(project.layout.buildDirectory.asFile.get(), "generated/kodama")
                 kotlin.sourceSets.findByName("test")?.kotlin?.srcDir(generatedDir)
 
-                // Make test compilation depend on code generation
+                // Make BOTH main and test compilation depend on code generation
+                // This ensures IntelliJ's "Build Project" triggers regeneration
+                project.tasks.findByName("compileKotlin")?.let { compileTask ->
+                    compileTask.dependsOn(generateTask)
+                }
                 project.tasks.named("compileTestKotlin").configure { compileTask ->
                     compileTask.dependsOn(generateTask)
                 }

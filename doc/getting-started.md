@@ -180,6 +180,95 @@ val wrong1: Column<Int?> = Product.id  // Type mismatch
 val wrong2: Column<Int> = Product.discount  // Type mismatch
 ```
 
+## Advanced Features
+
+### INSERT Statements
+
+Kodama generates type-safe INSERT methods for each table with all columns as required parameters:
+
+```kotlin
+// All columns must be provided
+val result = Order.insert(
+    transaction = transaction,
+    id = 1,
+    userName = "kodama",
+    product = "Laptop",
+    cost = 1500
+)
+
+println("Inserted ${result.rowsAffected} row(s)")
+result.generatedKeys["id"]?.let { println("Generated ID: $it") }
+
+// Nullable columns must be explicitly passed (null or value)
+Order.insert(
+    transaction = transaction,
+    id = 2,
+    userName = "user2",
+    product = "Mouse",
+    cost = 50,
+    notes = null  // Explicit null for nullable column
+)
+```
+
+**Key Features:**
+- All columns are required parameters (compile-time safety on schema changes)
+- Nullable columns have `Type?` parameter
+- Returns `InsertResult` with `rowsAffected` and `generatedKeys`
+- Proper NULL handling in prepared statements
+
+### Aggregate Functions
+
+Kodama supports type-safe aggregate functions with named accessors:
+
+```kotlin
+// Simple aggregate query
+val results = query()
+    .from(Order)
+    .select_totalRevenue { sum(order.cost) }
+    .select_orderCount { count(order.id) }
+    .execute(transaction)
+
+// Access with compile-time safe named accessors
+results.forEach { row ->
+    val revenue: Number = row.totalRevenue
+    val count: Number = row.orderCount
+    println("Total: $revenue from $count orders")
+}
+
+// Mix columns with aggregates (GROUP BY is automatic)
+val byUser = query()
+    .from(Order)
+    .select { order.userName }
+    .select_userTotal { sum(order.cost) }
+    .execute(transaction)
+
+byUser.forEach { row ->
+    println("${row.order.userName}: ${row.userTotal}")
+}
+```
+
+**Available Functions:**
+- `count(column)` - Count rows
+- `sum(column)` - Sum values
+- `avg(column)` - Average value
+- `min(column)` - Minimum value
+- `max(column)` - Maximum value
+
+### ORDER BY
+
+Sort query results with type-safe column references:
+
+```kotlin
+query()
+    .from(User)
+    .select { +user.all() }
+    .orderBy {
+        user.age.desc()  // Descending
+        user.name.asc()  // Ascending
+    }
+    .execute(transaction)
+```
+
 ## Next Steps
 
 - [Table Definitions](table-definitions.md) - Learn how to define tables and columns

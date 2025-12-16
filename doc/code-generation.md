@@ -75,7 +75,9 @@ plugins {
 
 ## What Gets Generated
 
-### Example: Person + Order Query
+Kodama generates several types of code based on your schema and queries:
+
+### 1. Query Builders
 
 When you write this query:
 
@@ -135,6 +137,92 @@ class QueryResult_Person_Order(
     val order = OrderResultAccessor(...)
 }
 ```
+
+### 2. INSERT Methods
+
+For each table, Kodama generates a type-safe `insert()` extension method:
+
+**Your Schema:**
+```kotlin
+object Order : Table("order") {
+    val id = integer("id").primaryKey()
+    val userName = varchar("user_name", 255)
+    val product = varchar("product", 255)
+    val cost = integer("cost")
+}
+```
+
+**Generated INSERT Method:**
+```kotlin
+fun Order.insert(
+    transaction: JdbcTransaction,
+    id: Int,
+    userName: String,
+    product: String,
+    cost: Int
+): InsertResult {
+    val table = this
+    val insert = InsertStatement(
+        table = table,
+        columns = listOf(table.id, table.userName, table.product, table.cost),
+        values = listOf(id, userName, product, cost)
+    )
+    return transaction.executeInsert(insert)
+}
+```
+
+**Key Features:**
+- All columns are required parameters (compile-time safety)
+- Nullable columns have `Type?` parameter
+- Returns `InsertResult` with `rowsAffected` and `generatedKeys`
+- Parameter names match column names exactly
+
+### 3. Aggregate Methods
+
+When you use aggregate functions with named selections:
+
+**Your Query:**
+```kotlin
+query()
+    .from(Order)
+    .select_totalRevenue { sum(order.cost) }
+    .select_orderCount { count(order.id) }
+```
+
+**Generated Methods:**
+```kotlin
+// Method for first aggregate
+fun <OrderSel> AfterFromQueryBuilder_Order<OrderSel, NoSelections>.select_totalRevenue(
+    block: SelectContext_Order.() -> AggregateFunction<*>
+): AfterFromQueryBuilder_Order<OrderSel, SelectionSet_totalRevenue>
+
+// Method for second aggregate
+fun <OrderSel> AfterFromQueryBuilder_Order<OrderSel, SelectionSet_totalRevenue>.select_orderCount(
+    block: SelectContext_Order.() -> AggregateFunction<*>
+): AfterFromQueryBuilder_Order<OrderSel, SelectionSet_totalRevenue_orderCount>
+```
+
+**Generated Result Class:**
+```kotlin
+class SelectionResult_totalRevenue_orderCount(
+    override val resultSet: ResultSet,
+    override val relations: RelationsContainer,
+    override val selectedColumns: List<Column<*>>,
+    private val selectables: List<Selectable>
+) : QueryResult {
+    val totalRevenue: Number
+        get() = selectables[0].getValue(resultSet, selectedColumns.size + 1) as Number
+
+    val orderCount: Number
+        get() = selectables[1].getValue(resultSet, selectedColumns.size + 2) as Number
+}
+```
+
+**Type Safety:**
+- Method names enforce alias (`select_totalRevenue`)
+- Each selection advances the type state
+- Only selected aggregates have accessors on result
+- Compile-time error if you access non-selected aggregates
 
 ## How Scanning Works
 

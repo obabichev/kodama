@@ -28,6 +28,7 @@
             <option value="$PROJECT_DIR$/buildSrc" />
             <option value="$PROJECT_DIR$/kodama-compiler-plugin" />
             <option value="$PROJECT_DIR$/kodama-core" />
+            <option value="$PROJECT_DIR$/kodama-ksp" />
             <option value="$PROJECT_DIR$/kodama-tests" />
           </set>
         </option>

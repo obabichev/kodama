@@ -17,6 +17,14 @@ import com.obabichev.kodama.components.types.StringColumnType
  *     val age = integer("age")
  * }
  * ```
+ *
+ * Note: Table properties are accessed through generated contexts in queries:
+ * ```
+ * query()
+ *     .from(Person)
+ *     .select { person.name }  // Access via context, not Person.name
+ *     .where { person.age eq 25 }
+ * ```
  */
 abstract class Table(tableName: String) {
     val relation: Relation = Relation(tableName)
@@ -25,6 +33,11 @@ abstract class Table(tableName: String) {
         // Register this table globally
         Tables.register(this)
     }
+
+    /**
+     * Returns the fully qualified table name (used for generated code)
+     */
+    val tableName: String = tableName
 
     /**
      * Define an integer column (non-nullable by default)

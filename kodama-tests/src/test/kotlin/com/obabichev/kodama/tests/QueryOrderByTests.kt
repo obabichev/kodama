@@ -14,7 +14,7 @@ class QueryOrderByTests : PostgresBaseTest() {
     fun testOrderByAsc() {
         val queryBuilder = query()
             .from(Person)
-            .select(Person.all())
+            .selectAll(Person)
             .orderBy {
                 +person.age.asc()
             }
@@ -40,7 +40,7 @@ class QueryOrderByTests : PostgresBaseTest() {
     fun testOrderByDesc() {
         val queryBuilder = query()
             .from(Person)
-            .select(Person.all())
+            .selectAll(Person)
             .orderBy {
                 +person.age.desc()
             }
@@ -65,7 +65,7 @@ class QueryOrderByTests : PostgresBaseTest() {
     fun testOrderByMultipleColumns() {
         val queryBuilder = query()
             .from(Person)
-            .select(Person.all())
+            .selectAll(Person)
             .orderBy {
                 +person.age.desc()
                 +person.name.asc()
@@ -93,7 +93,7 @@ class QueryOrderByTests : PostgresBaseTest() {
     fun testOrderByWithWhere() {
         val queryBuilder = query()
             .from(Person)
-            .select(Person.all())
+            .selectAll(Person)
             .where {
                 person.age eq 2
             }
@@ -119,8 +119,8 @@ class QueryOrderByTests : PostgresBaseTest() {
             .join(Order) {
                 order.userName eq person.name
             }
-            .select(Person.all())
-            .select(Order.all())
+            .selectAll(Person)
+            .selectAll(Order)
             .orderBy {
                 +order.cost.desc()
             }
@@ -150,8 +150,8 @@ class QueryOrderByTests : PostgresBaseTest() {
             .join(Order) {
                 order.userName eq person.name
             }
-            .select(Person.all())
-            .select(Order.all())
+            .selectAll(Person)
+            .selectAll(Order)
             .orderBy {
                 +person.name.asc()
                 +order.cost.asc()
