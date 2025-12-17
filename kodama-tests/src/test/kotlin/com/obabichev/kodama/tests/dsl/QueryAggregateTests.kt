@@ -1,20 +1,30 @@
-package com.obabichev.kodama.tests
+package com.obabichev.kodama.tests.dsl
 
 import com.obabichev.kodama.query.query
+import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.tests.data.*
+import com.obabichev.kodama.tests.infrastructure.DatabaseTest
 import com.obabichev.kodama.tests.schema.Order
 import kotlin.test.Test
+import kotlin.test.Ignore
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.test.assertNotNull
 
-class QueryAggregateTests : PostgresBaseTest() {
+class QueryAggregateTests : DatabaseTest() {
+    override fun requiredTables(): List<Table> = listOf(Order)
+
     // All tests now use the new select_xxx() API with named accessors
 
     @Test
     fun testSingleAggregateWithNamedAccessor() {
         // 🚀 NEW API: Named selection with type-safe named accessor!
         // Alias is automatically inferred from method name - no boilerplate!
+        testData {
+            order(1, "kodama", "Laptop", 1000)
+            order(2, "kodama", "Mouse", 50)
+        }
+
         withConnection {
             val results = query()
                 .from(Order)
@@ -39,6 +49,12 @@ class QueryAggregateTests : PostgresBaseTest() {
     fun testMultipleAggregatesWithNamedAccessors() {
         // 🚀 NEW API: Chained named selections with type-safe named accessors!
         // Aliases are automatically inferred from method names!
+        testData {
+            order(1, "kodama", "Laptop", 1000)
+            order(2, "kodama", "Mouse", 50)
+            order(3, "kokoro", "Keyboard", 100)
+        }
+
         withConnection {
             val results = query()
                 .from(Order)
@@ -66,23 +82,20 @@ class QueryAggregateTests : PostgresBaseTest() {
     fun testMixedColumnAndAggregateSelection() {
         // 🚀 Mix regular columns with aggregate functions!
         // Automatically generates GROUP BY for selected columns
+        testData {
+            order(1, "kodama", "Laptop", 1000)
+            order(2, "kodama", "Mouse", 50)
+        }
+
         withConnection {
-            val builder = query()
+            // Use continuous chain so scanner can detect the pattern
+
+            val results = query()
                 .from(Order)
                 .select { order.cost }
                 .select_orderCount { count(order.id) }
+                .execute(this)
 
-            val query = builder.build()
-
-            // Verify SQL includes both column and aggregate with GROUP BY
-            val sql = query.sql()
-            println("Generated SQL: $sql")
-            assertTrue(sql.contains("cost"), "SQL should select cost column")
-            assertTrue(sql.contains("COUNT("), "SQL should have COUNT aggregate")
-            assertTrue(sql.contains("GROUP BY"), "SQL should have GROUP BY clause")
-            assertTrue(sql.contains("\"order\".cost"), "GROUP BY should include cost column")
-
-            val results = builder.execute(this)
             val row = results.first()
 
             // Verify we can access both column and aggregate

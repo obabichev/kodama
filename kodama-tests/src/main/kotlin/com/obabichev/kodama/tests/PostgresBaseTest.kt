@@ -1,131 +1,46 @@
 package com.obabichev.kodama.tests
 
-import com.obabichev.kodama.execute.JdbcTransaction
+import com.obabichev.kodama.schema.Table
+import com.obabichev.kodama.tests.infrastructure.DatabaseTest
+import com.obabichev.kodama.tests.infrastructure.TestFixtures
+import com.obabichev.kodama.tests.schema.*
 import kotlin.test.BeforeTest
 
-open class PostgresBaseTest {
-    private val url = "jdbc:postgresql://localhost:5454/kodama"
-    private val user = "kodama"
-    private val password = "kodama"
+/**
+ * Base class for PostgreSQL tests using the standard test data.
+ *
+ * Migration Note: This class now extends DatabaseTest which provides:
+ * - Fast schema management (create once per test class)
+ * - Data cleanup between tests
+ * - Type-safe data insertion DSL
+ *
+ * Tests extending this class automatically get the FULL_DATASET fixture loaded before each test.
+ * This maintains backward compatibility with existing tests.
+ *
+ * For new tests, consider:
+ * 1. Extending DatabaseTest directly
+ * 2. Using specific fixtures via useFixture(TestFixtures.BASIC_ECOMMERCE)
+ * 3. Using testData {} for custom data
+ */
+open class PostgresBaseTest : DatabaseTest() {
 
-    private fun createTransaction(): JdbcTransaction {
-        return JdbcTransaction(
-            url = url,
-            user = user,
-            password = password
-        )
-    }
+    /**
+     * PostgresBaseTest uses FULL_DATASET which includes all tables.
+     * Subclasses can override this to specify a subset if they don't need all tables.
+     */
+    override fun requiredTables(): List<Table> = listOf(Person, Order, Profile, Company, Product)
 
-    fun <T> withConnection(block: JdbcTransaction.() -> T): T {
-        val transaction = createTransaction()
-        try {
-            val result = block(transaction)
-            transaction.commit()
-            return result
-        } catch (e: Exception) {
-            transaction.rollback()
-            throw e
-        } finally {
-            transaction.close()
-        }
-    }
-
+    /**
+     * Load standard test data before each test.
+     * This ensures backward compatibility with existing tests that expect this data.
+     *
+     * Note: Individual tests can override this behavior by:
+     * - Not calling super.loadStandardTestData() in their own @BeforeTest
+     * - Or by extending DatabaseTest directly instead of PostgresBaseTest
+     */
     @BeforeTest
-    fun before() {
-        withConnection {
-            // Drop and recreate tables to ensure clean schema
-            executeUpdate("drop table if exists profile")
-            executeUpdate("drop table if exists \"order\"")
-            executeUpdate("drop table if exists person")
-            executeUpdate("drop table if exists company")
-            executeUpdate("drop table if exists product")
-
-            // Create person table
-            executeUpdate(
-                """
-                create table person
-                (
-                    name text primary key not null,
-                    age  integer          not null
-                )
-                """.trimIndent()
-            )
-
-            // Create order table (note: "order" is a reserved keyword in SQL, so we use quotes)
-            executeUpdate(
-                """
-                create table "order"
-                (
-                    id       integer primary key not null,
-                    user_name  text             not null,
-                    product  text                not null,
-                    cost     integer             not null
-                )
-                """.trimIndent()
-            )
-
-            // Create profile table
-            executeUpdate(
-                """
-                create table profile
-                (
-                    user_name text not null,
-                    contact   text not null,
-                    photo     text
-                )
-                """.trimIndent()
-            )
-
-            // Create company table
-            executeUpdate(
-                """
-                create table company
-                (
-                    id           integer primary key not null,
-                    company_name text                not null
-                )
-                """.trimIndent()
-            )
-
-            // Create product table with nullable columns
-            executeUpdate(
-                """
-                create table product
-                (
-                    id          integer primary key not null,
-                    name        text                not null,
-                    description text,
-                    price       integer             not null,
-                    discount    integer
-                )
-                """.trimIndent()
-            )
-
-            // Insert test data for person
-            executeUpdate("insert into person values ('kodama', 1)")
-            executeUpdate("insert into person values ('kokoro', 2)")
-            executeUpdate("insert into person values ('pipiru', 2)")
-
-            // Insert test data for order
-            executeUpdate("""insert into "order" values (1, 'kodama', 'Laptop', 1000)""")
-            executeUpdate("""insert into "order" values (2, 'kodama', 'Mouse', 50)""")
-            executeUpdate("""insert into "order" values (3, 'kokoro', 'Keyboard', 100)""")
-
-            // Insert test data for profile
-            executeUpdate("insert into profile values ('kodama', 'kodama@example.com', 'photo1.jpg')")
-            executeUpdate("insert into profile values ('kokoro', 'kokoro@example.com', 'photo2.jpg')")
-            executeUpdate("insert into profile values ('pipiru', 'pipiru@example.com', 'photo3.jpg')")
-
-            // Insert test data for company
-            executeUpdate("insert into company values (1, 'Acme Corp')")
-            executeUpdate("insert into company values (2, 'Tech Solutions')")
-            executeUpdate("insert into company values (3, 'Global Industries')")
-
-            // Insert test data for product with both null and non-null values
-            executeUpdate("insert into product values (1, 'Laptop', 'High-performance laptop', 1500, 10)")
-            executeUpdate("insert into product values (2, 'Mouse', NULL, 50, NULL)")  // NULL description and discount
-            executeUpdate("insert into product values (3, 'Keyboard', 'Mechanical keyboard', 120, NULL)")  // NULL discount only
-            executeUpdate("insert into product values (4, 'Monitor', NULL, 300, 15)")  // NULL description only
-        }
+    fun loadStandardTestData() {
+        super.setupTest()  // Call parent's setup first
+        useFixture(TestFixtures.FULL_DATASET)
     }
 }

@@ -2,13 +2,14 @@
 
 ## Overview
 
-Kodama is a type-safe SQL query builder for Kotlin that provides compile-time safety for your database queries. Unlike traditional ORMs that use reflection and runtime validation, Kodama ensures your queries are correct at compile time.
+Kodama is a type-safe SQL query builder and ORM for Kotlin that provides compile-time safety for your database operations. Unlike traditional ORMs that use reflection and runtime validation, Kodama ensures your queries are correct at compile time.
 
 ## Key Features
 
-- **100% Type Safety**: All queries are validated at compile time
+- **100% Type Safety**: All queries and entities are validated at compile time
 - **No Reflection**: Uses code generation instead of runtime reflection
 - **Fluent DSL**: Natural, readable query syntax
+- **Entity Layer (ORM)**: Interface-based entities with relationships and CRUD operations
 - **PostgreSQL Support**: Optimized for PostgreSQL databases
 - **Type-Safe Results**: Access only the columns you selected, with correct types
 
@@ -18,11 +19,11 @@ Add Kodama to your `build.gradle.kts`:
 
 ```kotlin
 plugins {
-    id("com.obabichev.kodama") version "0.1.0"
+    id("com.obabichev.kodama") version "0.2.0"
 }
 
 dependencies {
-    implementation("com.obabichev.kodama:kodama-core:0.1.0")
+    implementation("com.obabichev.kodama:kodama-core:0.2.0")
 }
 ```
 
@@ -61,10 +62,7 @@ import com.obabichev.kodama.query.eq
 
 val queryBuilder = query()
     .from(Person)
-    .select {
-        +person.name
-        +person.age
-    }
+    .selectAll(Person)  // Select all columns from Person table
     .where {
         person.age eq 25
     }
@@ -99,10 +97,7 @@ object User : Table("users") {
 // 2. Build a query
 val queryBuilder = query()
     .from(User)
-    .select {
-        +user.email
-        +user.age
-    }
+    .selectAll(User)
     .where {
         user.age eq 25
     }
@@ -238,8 +233,8 @@ results.forEach { row ->
 // Mix columns with aggregates (GROUP BY is automatic)
 val byUser = query()
     .from(Order)
-    .select { order.userName }
-    .select_userTotal { sum(order.cost) }
+    .select { order.userName }  // Regular column selection
+    .select_userTotal { sum(order.cost) }  // Named aggregate
     .execute(transaction)
 
 byUser.forEach { row ->
@@ -261,21 +256,39 @@ Sort query results with type-safe column references:
 ```kotlin
 query()
     .from(User)
-    .select { +user.all() }
+    .selectAll(User)
     .orderBy {
-        user.age.desc()  // Descending
-        user.name.asc()  // Ascending
+        +user.age.desc()  // Descending
+        +user.name.asc()  // Ascending
     }
     .execute(transaction)
 ```
 
+### Entity Layer
+
+For ORM functionality with CRUD operations and relationships, see the [Entity Layer guide](entities.md):
+
+```kotlin
+EntitySession(connection).use { session ->
+    with(session) {
+        // CRUD operations
+        val user = get<User>(1)
+
+        // Relationships
+        val orders = user.orders()
+
+        // Save/update
+        save<User, Int>(user.copy(email = "new@example.com"))
+        flush()
+    }
+}
+```
+
 ## Next Steps
 
-- [Table Definitions](table-definitions.md) - Learn how to define tables and columns
-- [Query Building](query-building.md) - Master the query DSL
-- [Joins](joins.md) - Work with multiple tables
-- [Type-Safe Results](type-safe-results.md) - Understand result handling
-- [Code Generation](code-generation.md) - How Kodama generates code
+- **[Entity Layer (ORM)](entities.md)** - Learn about CRUD operations and relationships
+- **[Code Generation](code-generation.md)** - How Kodama generates code
+- **[Roadmap](../ROADMAP.md)** - See planned features
 
 ## Philosophy
 

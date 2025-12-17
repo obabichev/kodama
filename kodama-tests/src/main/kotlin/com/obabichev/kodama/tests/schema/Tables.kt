@@ -1,8 +1,13 @@
 package com.obabichev.kodama.tests.schema
 
 import com.obabichev.kodama.schema.Table
+import com.obabichev.kodama.schema.EntityTable
 import com.obabichev.kodama.schema.primaryKey
 import com.obabichev.kodama.schema.nullable
+import com.obabichev.kodama.tests.entity.User
+import com.obabichev.kodama.tests.entity.UserOrder
+import com.obabichev.kodama.entity.oneToMany
+import com.obabichev.kodama.entity.manyToOne
 
 /**
  * Person table definition
@@ -48,4 +53,100 @@ object Product : Table("product") {
     val description = varchar("description", 500).nullable()  // Optional description
     val price = integer("price")
     val discount = integer("discount").nullable()  // Optional discount percentage
+}
+
+/**
+ * Settings table for testing boolean column types
+ */
+object Settings : Table("settings") {
+    val id = integer("id").primaryKey()
+    val key = varchar("key", 255)
+    val enabled = boolean("enabled")
+    val verified = boolean("verified").nullable()  // Optional boolean
+}
+
+/**
+ * Numerics table for testing all numeric column types
+ */
+object Numerics : Table("numerics") {
+    val id = integer("id").primaryKey()
+    val smallIntValue = smallint("small_int_value")
+    val intValue = integer("int_value")
+    val bigIntValue = bigint("big_int_value")
+    val decimalValue = decimal("decimal_value", 10, 2)  // NUMERIC(10,2)
+    val realValue = real("real_value")
+    val doubleValue = doublePrecision("double_value")
+    // Nullable columns
+    val nullableSmallInt = smallint("nullable_small_int").nullable()
+    val nullableBigInt = bigint("nullable_big_int").nullable()
+    val nullableDecimal = decimal("nullable_decimal", 15, 4).nullable()
+    val nullableReal = real("nullable_real").nullable()
+    val nullableDouble = doublePrecision("nullable_double").nullable()
+}
+
+/**
+ * UserOrders entity table - orders placed by users.
+ * Demonstrates one-to-many relationship with Users.
+ *
+ * Relationship:
+ * - Users (1) → UserOrders (N)
+ * - One user can have many orders
+ * - userId foreign key references Users.id
+ *
+ * Usage:
+ * ```kotlin
+ * EntitySession(connection).use { session ->
+ *     val user = session.find<User>(1)!!
+ *     val orders = user.orders(session)  // Load related orders
+ * }
+ * ```
+ */
+object UserOrders : EntityTable<UserOrder>("user_orders") {
+    val id = integer("id").primaryKey()
+    val userId = integer("user_id")  // FK to Users.id
+    val product = varchar("product", 255)
+    val amount = integer("amount")
+
+    /**
+     * Many-to-one relationship: UserOrder belongs to one User.
+     * Defined in init block to ensure columns are initialized first.
+     */
+    init {
+        manyToOne("user", Users, this.userId, Users.id)
+    }
+}
+
+/**
+ * Users entity table - example EntityTable with ORM support.
+ *
+ * This table demonstrates the entity layer:
+ * - Extends EntityTable<User> instead of Table
+ * - Generic parameter User explicitly connects table to entity class
+ * - Can be used in queries like regular tables
+ * - Can be used with EntitySession for entity loading/saving
+ *
+ * Example usage:
+ * ```kotlin
+ * // Query DSL (works like regular tables)
+ * query().from(Users).select { +users.name }
+ *
+ * // Entity layer
+ * EntitySession(connection).use { session ->
+ *     session.registerBinding(Users, UserEntityBinding)
+ *     val user = session.find(Users, 1)
+ * }
+ * ```
+ */
+object Users : EntityTable<User>("users") {
+    val id = integer("id").primaryKey()
+    val name = varchar("name", 255)
+    val email = varchar("email", 255)
+
+    /**
+     * One-to-many relationship: User has many UserOrders.
+     * Defined in init block to ensure columns are initialized first.
+     */
+    init {
+        oneToMany("orders", UserOrders, UserOrders.userId, this.id)
+    }
 }

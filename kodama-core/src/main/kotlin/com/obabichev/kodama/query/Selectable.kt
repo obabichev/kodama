@@ -69,3 +69,17 @@ class SubquerySelectable(
         return resultSet.getObject(position)
     }
 }
+
+/**
+ * Expression selection (computed columns, boolean expressions, etc.)
+ */
+class ExpressionSelectable(
+    override val alias: String,
+    val expression: com.obabichev.kodama.components.expression.Expression
+) : Selectable {
+    override val type: SelectableType = SelectableType.COMPUTED
+
+    override fun getValue(resultSet: java.sql.ResultSet, position: Int): Any? {
+        return resultSet.getObject(position)
+    }
+}

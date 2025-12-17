@@ -1,24 +1,34 @@
-package com.obabichev.kodama.tests
+package com.obabichev.kodama.tests.dsl
 
 import com.obabichev.kodama.components.JoinType
+import com.obabichev.kodama.components.expression.and
 import com.obabichev.kodama.query.query
 import com.obabichev.kodama.query.eq
+import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.tests.data.*
+import com.obabichev.kodama.tests.infrastructure.DatabaseTest
 import com.obabichev.kodama.tests.schema.Order
 import com.obabichev.kodama.tests.schema.Person
 import com.obabichev.kodama.tests.schema.Profile
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class QuerySimpleDataClassTests : PostgresBaseTest() {
+class QuerySimpleDataClassTests : DatabaseTest() {
+
+    override fun requiredTables(): List<Table> = listOf(Person, Order, Profile)
     @Test
     fun test1() {
+        testData {
+            person("kodama", age = 1)
+            order(1, "kodama", "Laptop", 1000)
+        }
+
         val queryBuilder = query()
             .from(Person)
             .join(Order) { order.userName eq person.name }
             .selectAll(Person)
             .where {
-                person.name eq "kodama"
+                (order.product eq "Laptop") and (person.name eq "kodama")
             }
 
         println("Test 1 SQL: ${queryBuilder.build().sql()}")
@@ -26,6 +36,9 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
         withConnection {
             val results = queryBuilder.execute(this)
             val row = results.first()
+
+            // Type safety verified: row.order is NOT accessible since Order wasn't selected
+            // Only Person was selected with .selectAll(Person), so only row.person exists
             assertEquals("kodama", row.person.name)
             assertEquals(1, row.person.age)
         }
@@ -33,6 +46,10 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
 
     @Test
     fun test2_selectOnlyNoJoin() {
+        testData {
+            person("kodama", age = 1)
+        }
+
         val queryBuilder = query()
             .from(Person)
             .selectAll(Person)
@@ -52,6 +69,10 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
 
     @Test
     fun test3_selectFromJoinedTable() {
+        testData {
+            person("kodama", age = 1)
+            order(1, "kodama", "Laptop", 1000)
+        }
 
         val queryBuilder = query()
             .from(Person)
@@ -76,6 +97,11 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
 
     @Test
     fun test4_selectSpecificColumns() {
+        testData {
+            person("kodama", age = 1)
+            order(1, "kodama", "Laptop", 1000)
+        }
+
         // Use new .select() API for specific columns - chain them for type safety
         withConnection {
             val results = query()
@@ -101,6 +127,11 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
 
     @Test
     fun test5_joinWithProfile() {
+        testData {
+            person("kodama", age = 1)
+            order(1, "kodama", "Laptop", 1000)
+        }
+
         withConnection {
             val results = query()
                 .from(Person)
@@ -124,6 +155,11 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
 
     @Test
     fun test6_twoJoins() {
+        testData {
+            person("kodama", age = 1)
+            order(1, "kodama", "Laptop", 1000)
+        }
+
         val queryBuilder = query()
             .from(Person)
             .join(Order) {
@@ -149,6 +185,11 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
 
     @Test
     fun test7_selectFromProfile() {
+        testData {
+            person("kodama", age = 1)
+            profile("kodama", "kodama@example.com", "photo1.jpg")
+        }
+
         val queryBuilder = query()
             .from(Profile)
             .selectAll(Profile)
@@ -169,6 +210,12 @@ class QuerySimpleDataClassTests : PostgresBaseTest() {
 
     @Test
     fun test8_multipleJoins() {
+        testData {
+            person("kodama", age = 1)
+            order(1, "kodama", "Laptop", 1000)
+            profile("kodama", "kodama@example.com", "photo1.jpg")
+        }
+
         val queryBuilder = query()
             .from(Person)
             .join(Order) { order.userName eq person.name }

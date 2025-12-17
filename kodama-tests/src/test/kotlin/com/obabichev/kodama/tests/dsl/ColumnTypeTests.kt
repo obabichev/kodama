@@ -1,6 +1,8 @@
-package com.obabichev.kodama.tests
+package com.obabichev.kodama.tests.dsl
 
 import com.obabichev.kodama.components.Column
+import com.obabichev.kodama.schema.Table
+import com.obabichev.kodama.tests.infrastructure.DatabaseTest
 import com.obabichev.kodama.tests.schema.Person
 import com.obabichev.kodama.tests.schema.Product
 import com.obabichev.kodama.tests.data.*
@@ -11,7 +13,9 @@ import kotlin.test.assertTrue
 /**
  * Tests to verify that column types correctly reflect nullability in the type system
  */
-class ColumnTypeTests {
+class ColumnTypeTests : DatabaseTest() {
+
+    override fun requiredTables(): List<Table> = listOf(Person, Product)
 
     @Test
     fun testNonNullableColumnTypes() {

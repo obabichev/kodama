@@ -2,7 +2,7 @@
 
 ## Overview
 
-Kodama uses Gradle-based code generation to create type-safe query builders and result accessors. This eliminates runtime reflection and ensures complete type safety at compile time.
+Kodama uses Gradle-based code generation to create type-safe query builders, result accessors, and entity implementations. This eliminates runtime reflection and ensures complete type safety at compile time.
 
 ## How It Works
 
@@ -22,10 +22,7 @@ object Person : Table("person") {
 query()
     .from(Person)
     .join(Order) { order.userName eq person.name }
-    .select {
-        +person.name
-        +order.product
-    }
+    .selectAll(Person)
 ```
 
 ### 3. Generator Scans Your Code
@@ -69,7 +66,7 @@ Add the plugin to `build.gradle.kts`:
 
 ```kotlin
 plugins {
-    id("com.obabichev.kodama") version "0.1.0"
+    id("com.obabichev.kodama") version "0.2.0"
 }
 ```
 
@@ -85,10 +82,7 @@ When you write this query:
 query()
     .from(Person)
     .join(Order) { order.userName eq person.name }
-    .select {
-        +person.name
-        +order.product
-    }
+    .selectAll(Person)
 ```
 
 Kodama generates:
@@ -224,6 +218,88 @@ class SelectionResult_totalRevenue_orderCount(
 - Only selected aggregates have accessors on result
 - Compile-time error if you access non-selected aggregates
 
+### 4. Entity Layer Code
+
+For interface-based entities, Kodama generates:
+
+**Your Entity Interface:**
+```kotlin
+interface User {
+    val id: Int
+    val name: String
+    val email: String
+
+    context(session: EntitySession)
+    fun orders(): List<UserOrder>
+}
+
+object Users : EntityTable<User>("users") {
+    val id = integer("id").primaryKey()
+    val name = varchar("name", 255)
+    val email = varchar("email", 255)
+
+    init {
+        oneToMany("orders", UserOrders, UserOrders.userId, this.id)
+    }
+}
+```
+
+**Generated Implementation:**
+```kotlin
+// 1. Internal data class implementation
+internal data class UserImpl(
+    override val id: Int,
+    override val name: String,
+    override val email: String
+) : User {
+    context(session: EntitySession)
+    override fun orders(): List<UserOrder> {
+        return session.findByForeignKey<UserOrder, Int, Int>(
+            UserOrders, UserOrders.userId, this.id
+        )
+    }
+}
+
+// 2. Factory function
+fun User(id: Int, name: String, email: String): User =
+    UserImpl(id, name, email)
+
+// 3. Copy extension function
+fun User.copy(
+    id: Int = this.id,
+    name: String = this.name,
+    email: String = this.email
+): User = (this as UserImpl).copy(id, name, email)
+```
+
+**Generated EntityBinding:**
+```kotlin
+object UserEntityBinding : EntityBinding<User, Int> {
+    override val table: EntityTable<User> = Users
+
+    override fun toEntity(resultSet: ResultSet): User {
+        return User(
+            id = resultSet.getInt("id"),
+            name = resultSet.getString("name"),
+            email = resultSet.getString("email")
+        )
+    }
+
+    override fun entityId(entity: User): Int = entity.id
+
+    override fun primaryKeyColumns(): List<Column<*>> = listOf(Users.id)
+
+    // ... INSERT/UPDATE methods
+}
+```
+
+**Benefits:**
+- Interface-based entities stay clean (no implementation details)
+- Factory functions for easy construction
+- Copy functions preserve interface type
+- EntityBindings handle database mapping
+- Relationship methods auto-generated
+
 ## How Scanning Works
 
 ### Table Discovery
@@ -283,8 +359,22 @@ class ProductResultAccessor_All(...) {
 
 ## Generated File Location
 
+### Query DSL Code
 ```
 build/generated/kodama/com/obabichev/kodama/tests/data/QueryExtensions.kt
+```
+
+### Entity Layer Code
+```
+build/generated/kodama/com/obabichev/kodama/tests/
+├── entity/
+│   ├── impl/
+│   │   ├── UserImpl.kt              # Generated implementations
+│   │   └── UserOrderImpl.kt
+│   └── bindings/
+│       ├── UserEntityBinding.kt     # Database mappings
+│       └── UserOrderEntityBinding.kt
+└── KodamaBindingRegistry.kt         # Auto-registration
 ```
 
 ## Build Integration
@@ -354,7 +444,7 @@ cat build/generated/kodama/com/obabichev/kodama/tests/data/QueryExtensions.kt
 // ✅ Will be detected
 val queryBuilder = query()
     .from(Person)
-    .select { +person.all() }
+    .selectAll(Person)
 
 // ❌ Won't be detected (split across variables)
 val q = query()

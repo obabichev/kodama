@@ -1,7 +1,8 @@
 # Kodama - Type-Safe SQL Query Builder for Kotlin
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
-[![Kotlin](https://img.shields.io/badge/kotlin-2.0+-blue.svg)](https://kotlinlang.org/)
+[![Kotlin](https://img.shields.io/badge/kotlin-2.2.0+-blue.svg)](https://kotlinlang.org/)
+[![Version](https://img.shields.io/badge/version-0.2.0-orange.svg)]()
 
 **Kodama** (Kotlin Data Mapper) is a type-safe SQL query builder for Kotlin and PostgreSQL. Unlike traditional ORMs, Kodama provides 100% compile-time type safety through code generation, eliminating runtime errors and reflection overhead.
 
@@ -13,6 +14,8 @@
 - **🎯 PostgreSQL Optimized** - Designed specifically for PostgreSQL
 - **📦 Lightweight** - Minimal dependencies, focused on core functionality
 - **✨ Nullable Types** - Full nullability support with `Column<T?>` for optional columns
+- **🗂️ Entity Layer** - Interface-based ORM with relationships and identity map
+- **🔗 Relationships** - Type-safe one-to-many and many-to-one navigation
 
 ## Quick Start
 
@@ -22,33 +25,56 @@ Add to your `build.gradle.kts`:
 
 ```kotlin
 plugins {
-    id("com.obabichev.kodama") version "0.1.0"
+    id("com.obabichev.kodama") version "0.2.0"
 }
 
 dependencies {
-    implementation("com.obabichev.kodama:kodama-core:0.1.0")
+    implementation("com.obabichev.kodama:kodama-core:0.2.0")
 }
 ```
 
 ### Define Your Schema
+
+**For Query DSL only:**
 
 ```kotlin
 import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.schema.primaryKey
 import com.obabichev.kodama.schema.nullable
 
-object User : Table("users") {
+object Users : Table("users") {
     val id = integer("id").primaryKey()
     val email = varchar("email", 255)
     val age = integer("age")
     val bio = varchar("bio", 500).nullable()  // Optional column - Column<String?>
 }
 
-object Order : Table("orders") {
+object Orders : Table("orders") {
     val id = integer("id").primaryKey()
     val userId = integer("user_id")
     val product = varchar("product", 255)
     val cost = integer("cost")
+}
+```
+
+**For Entity Layer (ORM):**
+
+```kotlin
+import com.obabichev.kodama.schema.EntityTable
+import com.obabichev.kodama.entity.oneToMany
+
+// Define entity interface
+interface User {
+    val id: Int
+    val email: String
+    val age: Int
+}
+
+// Define EntityTable with generic type
+object Users : EntityTable<User>("users") {
+    val id = integer("id").primaryKey()
+    val email = varchar("email", 255)
+    val age = integer("age")
 }
 ```
 
@@ -59,15 +85,11 @@ import com.obabichev.kodama.query.query
 import com.obabichev.kodama.query.eq
 
 val queryBuilder = query()
-    .from(User)
-    .join(Order) { order.userId eq user.id }
-    .select {
-        +user.email
-        +order.product
-        +order.cost
-    }
+    .from(Users)
+    .join(Orders) { orders.userId eq users.id }
+    .selectAll(Users)  // Select all columns from Users table
     .where {
-        user.age eq 25
+        users.age eq 25
     }
 ```
 
@@ -78,10 +100,8 @@ withConnection { transaction ->
     val results = queryBuilder.execute(transaction)
 
     results.forEach { row ->
-        println("${row.user.email} ordered ${row.order.product} for ${row.order.cost}")
-
-        // ❌ Won't compile - id wasn't selected!
-        // println(row.user.id)
+        // Access all selected columns from Users table
+        println("User ${row.users.id}: ${row.users.email}, age ${row.users.age}")
     }
 }
 ```
@@ -105,20 +125,17 @@ println(user.age) // 💥 Runtime error - type mismatch!
 ```kotlin
 // Kodama - errors caught at compile time
 val queryBuilder = query()
-    .from(User)
-    .select {
-        +user.name
-        +user.email
-    }
+    .from(Users)
+    .selectAll(Users)  // Select all columns
 
 withConnection { transaction ->
     val results = queryBuilder.execute(transaction)
     val row = results.first()
 
-    println(row.user.name)   // ✅ Compiles - name was selected
-    println(row.user.email)  // ✅ Compiles - email was selected
-    println(row.user.id)     // ❌ Won't compile - id not selected
-    println(row.user.age)    // ❌ Won't compile - age not selected
+    println(row.users.name)   // ✅ Compiles - all columns selected
+    println(row.users.email)  // ✅ Compiles - all columns selected
+    println(row.users.id)     // ✅ Compiles - all columns selected
+    println(row.users.age)    // ✅ Compiles - all columns selected
 }
 ```
 
@@ -128,31 +145,28 @@ withConnection { transaction ->
 
 ```kotlin
 query()
-    .from(User)
-    .select { +user.email }
-    .where { user.age eq 25 }
+    .from(Users)
+    .selectAll(Users)
+    .where { users.age eq 25 }
 ```
 
 **Generates:**
 ```sql
-SELECT email FROM users WHERE age = ?
+SELECT * FROM users WHERE age = ?
 ```
 
 ### Join Query
 
 ```kotlin
 query()
-    .from(User)
-    .join(Order) { order.userId eq user.id }
-    .select {
-        +user.email
-        +order.product
-    }
+    .from(Users)
+    .join(Orders) { orders.userId eq users.id }
+    .selectAll(Users)
 ```
 
 **Generates:**
 ```sql
-SELECT email, product
+SELECT users.id, users.email, users.age
 FROM users
 INNER JOIN orders ON orders.user_id = users.id
 ```
@@ -161,19 +175,15 @@ INNER JOIN orders ON orders.user_id = users.id
 
 ```kotlin
 query()
-    .from(User)
-    .join(Order) { order.userId eq user.id }
-    .join(Payment) { payment.orderId eq order.id }
-    .select {
-        +user.email
-        +order.product
-        +payment.amount
-    }
+    .from(Users)
+    .join(Orders) { orders.userId eq users.id }
+    .join(Payments) { payments.orderId eq orders.id }
+    .selectAll(Orders)
 ```
 
 **Generates:**
 ```sql
-SELECT email, product, amount
+SELECT orders.id, orders.user_id, orders.product, orders.cost
 FROM users
 INNER JOIN orders ON orders.user_id = users.id
 INNER JOIN payments ON payments.order_id = orders.id
@@ -183,26 +193,26 @@ INNER JOIN payments ON payments.order_id = orders.id
 
 ```kotlin
 query()
-    .from(User)
-    .select { +user.email }
+    .from(Users)
+    .selectAll(Users)
     .orderBy {
-        user.age.desc()
-        user.email.asc()
+        +users.age.desc()
+        +users.email.asc()
     }
 ```
 
 **Generates:**
 ```sql
-SELECT email FROM users ORDER BY age DESC, email ASC
+SELECT * FROM users ORDER BY age DESC, email ASC
 ```
 
 ### Aggregates
 
 ```kotlin
 query()
-    .from(Order)
-    .select_totalRevenue { sum(order.cost) }
-    .select_orderCount { count(order.id) }
+    .from(Orders)
+    .select_totalRevenue { sum(orders.cost) }
+    .select_orderCount { count(orders.id) }
     .execute(transaction)
 
 // Results have type-safe named accessors
@@ -221,7 +231,7 @@ SELECT SUM(cost) AS totalRevenue, COUNT(id) AS orderCount FROM orders
 
 ```kotlin
 // All columns required as parameters for compile-time safety
-val result = Order.insert(
+val result = Orders.insert(
     transaction = transaction,
     id = 1,
     userId = 100,
@@ -232,8 +242,8 @@ val result = Order.insert(
 println("Inserted ${result.rowsAffected} row(s)")
 result.generatedKeys["id"]?.let { println("Generated ID: $it") }
 
-// Nullable columns
-Product.insert(
+// Nullable columns (requires Product table with nullable columns)
+Products.insert(
     transaction = transaction,
     id = 1,
     name = "Widget",
@@ -244,8 +254,105 @@ Product.insert(
 
 **Generates:**
 ```sql
-INSERT INTO "order" (id, user_id, product, cost) VALUES (?, ?, ?, ?)
+INSERT INTO orders (id, user_id, product, cost) VALUES (?, ?, ?, ?)
 ```
+
+### Entity Layer (ORM)
+
+Define entities as interfaces with automatic implementation generation:
+
+```kotlin
+// Entity interface
+interface User {
+    val id: Int
+    val name: String
+    val email: String
+
+    // Relationship method with context parameter
+    context(session: EntitySession)
+    fun orders(): List<UserOrder>
+}
+
+interface UserOrder {
+    val id: Int
+    val userId: Int
+    val product: String
+    val amount: Int
+
+    context(session: EntitySession)
+    fun user(): User
+}
+
+// EntityTable definitions with relationships
+object Users : EntityTable<User>("users") {
+    val id = integer("id").primaryKey()
+    val name = varchar("name", 255)
+    val email = varchar("email", 255)
+
+    init {
+        oneToMany("orders", UserOrders, UserOrders.userId, this.id)
+    }
+}
+
+object UserOrders : EntityTable<UserOrder>("user_orders") {
+    val id = integer("id").primaryKey()
+    val userId = integer("user_id")
+    val product = varchar("product", 255)
+    val amount = integer("amount")
+
+    init {
+        manyToOne("user", Users, this.userId, Users.id)
+    }
+}
+```
+
+**Usage with EntitySession:**
+
+```kotlin
+EntitySession(connection).use { session ->
+    with(session) {
+        // Get entity by ID (throws if not found - no !! needed)
+        val user = get<User>(1)
+        println("${user.name} (${user.email})")
+
+        // Or use find() if entity might not exist (returns nullable)
+        val maybeUser = find<User>(999)
+        if (maybeUser != null) {
+            println(maybeUser.name)
+        }
+
+        // Navigate relationships (one-to-many)
+        val orders = user.orders()
+        orders.forEach { order ->
+            println("  - ${order.product}: $${order.amount}")
+        }
+
+        // Navigate back (many-to-one)
+        val firstOrder = orders.first()
+        val parentUser = firstOrder.user()
+        assert(user === parentUser)  // Same instance from identity map!
+
+        // Create and save new entity
+        val newOrder = UserOrder(
+            id = 100,
+            userId = user.id,
+            product = "Headphones",
+            amount = 80
+        )
+        save<UserOrder, Int>(newOrder)
+        flush()
+    }
+}
+```
+
+**Key Entity Layer Features:**
+- **Interface-based entities** - Define contract, get implementation for free
+- **Identity map** - Same ID always returns same instance within session
+- **Convenient API** - `get<Entity>(id)` returns non-null, `find<Entity>(id)` returns nullable
+- **Type-safe relationships** - Navigate parent ↔ children with compile-time safety
+- **Context parameters** - Clean syntax using Kotlin 2.2.0 context parameters
+- **Lazy loading** - Relationships loaded on-demand
+- **Bidirectional navigation** - Both one-to-many and many-to-one work seamlessly
 
 ## Documentation
 
@@ -276,54 +383,67 @@ Kodama is built on these core principles:
 | Compile-time safety | ✅ 100% | ⚠️ Partial | ✅ Yes | ❌ No |
 | Reflection-free | ✅ Yes | ❌ No | ✅ Yes | ❌ No |
 | Type-safe results | ✅ Yes | ❌ No | ✅ Yes | ⚠️ Partial |
+| Entity Layer (ORM) | ✅ Yes | ✅ Yes | ❌ No | ✅ Yes |
+| Type-safe relationships | ✅ Yes | ⚠️ Partial | ❌ No | ❌ No |
+| Interface-based entities | ✅ Yes | ❌ No | ❌ No | ❌ No |
 | PostgreSQL focused | ✅ Yes | ❌ No | ⚠️ Multi-DB | ❌ No |
 | Fluent DSL | ✅ Yes | ✅ Yes | ✅ Yes | ⚠️ Limited |
 | Code generation | ✅ Gradle | ❌ No | ✅ Maven/Gradle | ❌ No |
 
 ## Current Features
 
-**Version**: 0.1.0 (Alpha)
+**Version**: 0.2.0 (Alpha)
 
-### Query Building ✅
+### DSL Layer (Query Building) ✅
 - **SELECT** - Type-safe column selection
 - **FROM** - Single table queries
 - **INNER JOIN** - Multiple table queries with type-safe conditions
 - **WHERE** - Filter with `eq` operator
 - **ORDER BY** - Sort results with `.asc()` and `.desc()`
 - **Multiple Joins** - Chain joins across 3+ tables
-
-### Data Manipulation ✅
-- **INSERT** - Type-safe inserts with compile-time column validation
-  - All columns required as parameters
-  - Nullable column support
-  - Returns InsertResult with generated keys
-
-### Aggregates ✅
 - **Aggregate Functions** - `count()`, `sum()`, `avg()`, `min()`, `max()`
 - **Named Aggregates** - Type-safe aggregate aliases with method-based selection
 - **GROUP BY** - Automatic GROUP BY for mixed column + aggregate queries
-- **Type-Safe Results** - Compile-time safe aggregate result access
+- **INSERT** - Type-safe inserts with compile-time column validation
+
+### Entity Layer (ORM) ✅
+- **Interface-Based Entities** - Define entities as interfaces, get implementations for free
+- **EntitySession** - Identity map for entity caching and session management
+- **CRUD Operations** - `get()`, `find()`, `save()`, `delete()`, `flush()`
+  - `get<Entity>(id)` - Returns non-null entity or throws exception
+  - `find<Entity>(id)` - Returns nullable entity
+- **One-to-Many Relationships** - Type-safe parent → children navigation
+- **Many-to-One Relationships** - Type-safe child → parent navigation
+- **Bidirectional Relationships** - Navigate both directions with identity map consistency
+- **Context Parameters** - Clean syntax using Kotlin 2.2.0 context parameters
+- **Lazy Loading** - Relationships loaded on-demand
+- **Auto-Generated Implementations** - Internal data classes + factory functions
 
 ### Type System ✅
 - **Nullable Columns** - Full support with `Column<T?>` type
 - **Compile-Time Safety** - Only access what you selected
 - **Type-Safe Results** - Result types match selections exactly
+- **Type-Safe Relationships** - Relationship methods declared in interfaces
 
 ### In Progress 🚧
-- Additional WHERE operators (gt, lt, like, etc.)
+- Many-to-many relationships with junction tables
+- Batch loading (N+1 prevention)
+- Additional WHERE operators (gt, lt, like, isNull, etc.)
 - AND/OR boolean combinations
 - LIMIT and OFFSET
 
 ### Planned 📋
-- UPDATE and DELETE statements
+- UPDATE and DELETE statements (DSL layer)
 - LEFT/RIGHT/FULL OUTER JOINs
 - DISTINCT
 - IN operator and subqueries
+- Cascade operations (entity layer)
+- Dirty checking for partial updates
 - Window functions
 
 ## Requirements
 
-- Kotlin 2.0+
+- Kotlin 2.2.0+ (for context parameters in Entity Layer)
 - Gradle 8.0+
 - PostgreSQL 12+
 - JVM 17+
