@@ -1,6 +1,8 @@
-package com.obabichev.kodama.tests
+package com.obabichev.kodama.tests.dsl
 
+import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.tests.data.insert
+import com.obabichev.kodama.tests.infrastructure.DatabaseTest
 import com.obabichev.kodama.tests.schema.Order
 import com.obabichev.kodama.tests.schema.Profile
 import com.obabichev.kodama.tests.schema.Product
@@ -9,7 +11,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.test.assertNotNull
 
-class InsertTests : PostgresBaseTest() {
+class InsertTests : DatabaseTest() {
+
+    override fun requiredTables(): List<Table> = listOf(Order, Profile, Product)
 
     @Test
     fun testBasicInsert() {

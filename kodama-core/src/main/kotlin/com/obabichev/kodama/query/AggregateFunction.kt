@@ -1,15 +1,17 @@
 package com.obabichev.kodama.query
 
 import com.obabichev.kodama.components.Column
+import com.obabichev.kodama.components.expression.Expression
 
 /**
  * Base class for aggregate functions (SUM, COUNT, AVG, MIN, MAX)
+ * Implements Expression to allow aggregates to be used in expressions
  */
 sealed class AggregateFunction<T>(
     val functionName: String,
     val column: Column<*>?,
     private var _alias: String? = null
-) {
+) : Expression {
     /**
      * Check if an explicit alias has been set
      */
@@ -40,6 +42,24 @@ sealed class AggregateFunction<T>(
         _alias = aliasName
         return this
     }
+
+    /**
+     * Generate SQL for this aggregate function
+     * E.g., "SUM(column_name)" or "COUNT(*)"
+     */
+    override fun toSql(): String {
+        return if (column != null) {
+            "$functionName(${column.relation.name}.${column.name})"
+        } else {
+            "$functionName(*)"
+        }
+    }
+
+    /**
+     * Aggregate functions don't have query arguments (parameters)
+     * The column reference is part of the SQL, not a parameter
+     */
+    override fun arguments(): List<QueryArgument<*>> = emptyList()
 }
 
 /**

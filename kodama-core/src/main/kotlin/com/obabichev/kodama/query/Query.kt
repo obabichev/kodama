@@ -13,18 +13,19 @@ class Query(
     val orderBy: List<OrderByClause>,
     val relations: RelationsContainer,
     val aggregates: List<AggregateFunction<*>> = emptyList(),
-    val groupBy: List<Column<*>> = emptyList()
+    val groupBy: List<Column<*>> = emptyList(),
+    val selectables: List<Selectable> = emptyList()
 ) {
     fun sql(): String {
         val tableName = from.name
 
-        // Build SELECT clause with both columns and aggregates
+        // Build SELECT clause with columns, aggregates, and selectables
         val selectItems = mutableListOf<String>()
 
         // Add regular columns
         selectItems.addAll(select.map { "\"${it.relation.name}\".${it.name}" })
 
-        // Add aggregate functions
+        // Add aggregate functions (for backward compatibility)
         selectItems.addAll(aggregates.map { agg ->
             val funcName = agg.functionName
             val columnRef = if (agg.column != null) {
@@ -34,6 +35,37 @@ class Query(
             }
             "$funcName($columnRef) AS ${agg.accessorName}"
         })
+
+        // Add selectables (expressions, constants, subqueries, etc.)
+        selectItems.addAll(selectables.map { selectable ->
+            when (selectable) {
+                is ExpressionSelectable -> {
+                    "${selectable.expression.toSql()} AS ${selectable.alias}"
+                }
+                is AggregateSelectable -> {
+                    val agg = selectable.function
+                    val funcName = agg.functionName
+                    val columnRef = if (agg.column != null) {
+                        "\"${agg.column.relation.name}\".${agg.column.name}"
+                    } else {
+                        "*"
+                    }
+                    "$funcName($columnRef) AS ${selectable.alias}"
+                }
+                is ConstantSelectable -> {
+                    // Constants don't need to be in SELECT clause - they're computed client-side
+                    // But if we want to support them in SQL, we could add them as literals
+                    "'${selectable.value}' AS ${selectable.alias}"
+                }
+                is SubquerySelectable -> {
+                    "(${selectable.query.sql()}) AS ${selectable.alias}"
+                }
+                else -> {
+                    // Unknown selectable type - skip
+                    ""
+                }
+            }
+        }.filter { it.isNotEmpty() })
 
         val columns = selectItems.joinToString(", ")
 
@@ -75,6 +107,24 @@ class Query(
     }
 
     fun arguments(): List<QueryArgument<*>> {
-        return whereExpression?.arguments() ?: emptyList()
+        val args = mutableListOf<QueryArgument<*>>()
+
+        // Add arguments from WHERE clause
+        whereExpression?.arguments()?.let { args.addAll(it) }
+
+        // Add arguments from selectables (e.g., ExpressionSelectable may have parameters)
+        selectables.forEach { selectable ->
+            when (selectable) {
+                is ExpressionSelectable -> {
+                    args.addAll(selectable.expression.arguments())
+                }
+                is SubquerySelectable -> {
+                    args.addAll(selectable.query.arguments())
+                }
+                // AggregateSelectable and ConstantSelectable don't have arguments
+            }
+        }
+
+        return args
     }
 }

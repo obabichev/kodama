@@ -1,10 +1,11 @@
 # Kodama Documentation
 
-Welcome to the Kodama documentation! Kodama is a type-safe SQL query builder for Kotlin and PostgreSQL.
+Welcome to the Kodama documentation! Kodama is a type-safe SQL query builder and ORM for Kotlin and PostgreSQL.
 
 ## Documentation
 
-- **[Getting Started](getting-started.md)** - Installation, basic concepts, and how to use Kodama
+- **[Getting Started](getting-started.md)** - Installation, basic concepts, and query building
+- **[Entity Layer (ORM)](entities.md)** - CRUD operations, relationships, and entity management
 - **[Code Generation](code-generation.md)** - How Kodama generates type-safe code
 - **[Roadmap](../ROADMAP.md)** - Planned features and development roadmap
 
@@ -16,19 +17,20 @@ Add Kodama to your `build.gradle.kts`:
 
 ```kotlin
 plugins {
-    id("com.obabichev.kodama") version "0.1.0"
+    id("com.obabichev.kodama") version "0.2.0"
 }
 
 dependencies {
-    implementation("com.obabichev.kodama:kodama-core:0.1.0")
+    implementation("com.obabichev.kodama:kodama-core:0.2.0")
 }
 ```
 
 ### 2. Define Tables
 
 ```kotlin
-object Person : Table("person") {
-    val name = varchar("name", 255).primaryKey()
+object Users : Table("users") {
+    val id = integer("id").primaryKey()
+    val name = varchar("name", 255)
     val age = integer("age")
 }
 ```
@@ -37,9 +39,9 @@ object Person : Table("person") {
 
 ```kotlin
 query()
-    .from(Person)
-    .select { +person.name }
-    .where { person.age eq 25 }
+    .from(Users)
+    .selectAll(Users)
+    .where { users.age eq 25 }
 ```
 
 ### 4. Execute
@@ -48,7 +50,18 @@ query()
 withConnection { transaction ->
     val results = queryBuilder.execute(transaction)
     results.forEach { row ->
-        println(row.person.name)
+        println("${row.users.name} is ${row.users.age} years old")
+    }
+}
+```
+
+### 5. Or Use Entity Layer
+
+```kotlin
+EntitySession(connection).use { session ->
+    with(session) {
+        val user = get<User>(1)
+        println("${user.name} (${user.email})")
     }
 }
 ```

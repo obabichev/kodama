@@ -56,7 +56,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
                 // Extract properties from table body with their types and nullability
                 // Match patterns like: val name = varchar(...).primaryKey() or val age = integer(...).nullable()
-                val propertyPattern = """val\s+(\w+)\s*=\s*(varchar|integer|text|boolean|timestamp|date|double|float|long|bigDecimal)\s*\([^)]*\)([^\n]*)""".toRegex()
+                val propertyPattern = """val\s+(\w+)\s*=\s*(varchar|integer|smallint|bigint|text|boolean|timestamp|date|double|doublePrecision|float|real|long|bigDecimal|decimal)\s*\([^)]*\)([^\n]*)""".toRegex()
                 val properties = propertyPattern.findAll(tableBody)
                     .map { it.groupValues[1] }
                     .toList()
@@ -76,12 +76,17 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     val kotlinType = when (typeMethod) {
                         "varchar", "text" -> "String"
                         "integer" -> "Int"
+                        "smallint" -> "Short"
+                        "bigint" -> "Long"
                         "long" -> "Long"
-                        "double" -> "Double"
+                        "decimal" -> "java.math.BigDecimal"
+                        "bigDecimal" -> "java.math.BigDecimal"
+                        "real" -> "Float"
                         "float" -> "Float"
+                        "doublePrecision" -> "Double"
+                        "double" -> "Double"
                         "boolean" -> "Boolean"
                         "timestamp", "date" -> "java.time.LocalDateTime"
-                        "bigDecimal" -> "java.math.BigDecimal"
                         else -> "Any"
                     }
                     propertyTypes[propName] = kotlinType
@@ -173,6 +178,22 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
                 // Extract selection pattern - preserve order for HList type accumulation!
                 val selections = mutableListOf<String>()
+
+                // First, detect named aggregate selection methods: .select_xxx { aggregate(...) }
+                // The accessor name comes from the method name, not an alias
+                val namedSelectPattern = """\.select_(\w+)\s*\{([^}]*)\}""".toRegex()
+                namedSelectPattern.findAll(queryChain).forEach { namedMatch ->
+                    val accessorName = namedMatch.groupValues[1]
+                    val blockContent = namedMatch.groupValues[2]
+
+                    // Check if block contains an aggregate function
+                    if (aggregatePattern.containsMatchIn(blockContent)) {
+                        val selection = "agg:$accessorName"
+                        if (selection !in selections) {
+                            selections.add(selection)
+                        }
+                    }
+                }
 
                 // Find select blocks and extract their contents
                 // Match both .select { } and .selectAggregates { }
@@ -441,7 +462,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                 appendLine(") : AfterFromQueryBuilderBase<NoSelection> {")
                 appendLine("    // Explicit build() method to avoid Kotlin compiler resolution issues with complex generics")
                 appendLine("    override fun build(): Query {")
-                appendLine("        if (state._selectedColumns.isEmpty() && state._aggregateSelections.isEmpty()) {")
+                appendLine("        if (state._selectedColumns.isEmpty() && state._aggregateSelections.isEmpty() && state._selectables.isEmpty()) {")
                 appendLine("            throw IllegalStateException(\"SELECT clause is required. Call select() at least once.\")")
                 appendLine("        }")
                 appendLine("        val from = state._from ?: throw IllegalStateException(\"FROM clause is required.\")")
@@ -463,7 +484,8 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                 appendLine("            state._orderBy.toList(),")
                 appendLine("            state.relations,")
                 appendLine("            state._aggregateSelections.toList(),")
-                appendLine("            groupBy")
+                appendLine("            groupBy,")
+                appendLine("            state._selectables.toList()")
                 appendLine("        )")
                 appendLine("    }")
                 appendLine("}")
@@ -756,8 +778,20 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                                         appendLine("}")
                                         appendLine()
                                     }
+                                    SelectionType.COMPUTED -> {
+                                        appendLine("@JvmName(\"select_${selection.alias}_${currentState}_to_${nextState}\")")
+                                        appendLine("fun <$genericParams> $builderClassName<$genericParams, $currentState>.select_${selection.alias}(")
+                                        appendLine("    block: $contextClassName.() -> com.obabichev.kodama.components.expression.Expression")
+                                        appendLine("): $builderClassName<$genericParams, $nextState> {")
+                                        appendLine("    val context = $contextClassName(state)")
+                                        appendLine("    val expr = context.block()")
+                                        appendLine("    state._selectables.add(com.obabichev.kodama.query.ExpressionSelectable(\"${selection.alias}\", expr))")
+                                        appendLine("    return $builderClassName(state)")
+                                        appendLine("}")
+                                        appendLine()
+                                    }
                                     else -> {
-                                        // Future: window functions, metadata, computed, etc.
+                                        // Future: window functions, metadata, etc.
                                         appendLine("// TODO: Support ${selection.type} selection type")
                                     }
                                 }
@@ -1189,12 +1223,29 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     appendLine("    override val selectedColumns: List<com.obabichev.kodama.components.Column<*>>,")
                     appendLine("    private val selectables: List<com.obabichev.kodama.query.Selectable>")
                     appendLine(") : com.obabichev.kodama.query.QueryResult {")
+                    appendLine()
+
+                    // Generate cached value properties
+                    pattern.selections.forEachIndexed { index, selection ->
+                        appendLine("    val ${selection.alias}: ${selection.kotlinType}")
+                    }
+                    appendLine()
+
                     appendLine("    init {")
                     appendLine("        require(selectables.size == ${pattern.selections.size}) { \"Expected exactly ${pattern.selections.size} selection(s), got \${selectables.size}\" }")
                     appendLine("        // Verify aliases match")
                     appendLine("        val expectedAliases = listOf(${pattern.selections.joinToString(", ") { "\"${it.alias}\"" }})")
                     appendLine("        val actualAliases = selectables.map { it.alias }")
                     appendLine("        require(actualAliases == expectedAliases) { \"Expected aliases \$expectedAliases, got \$actualAliases\" }")
+                    appendLine()
+                    appendLine("        // Cache values from result set")
+                    pattern.selections.forEachIndexed { index, selection ->
+                        appendLine("        ${selection.alias} = run {")
+                        appendLine("            val selectable = selectables[$index]")
+                        appendLine("            val position = selectedColumns.size + $index + 1")
+                        appendLine("            selectable.getValue(resultSet, position) as ${selection.kotlinType}")
+                        appendLine("        }")
+                    }
                     appendLine("    }")
                     appendLine()
 
@@ -1216,17 +1267,6 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
                         appendLine("    val $tableName: $accessorClass")
                         appendLine("        get() = $accessorClass(resultSet, relations, selectedColumns)")
-                        appendLine()
-                    }
-
-                    // Generate typed accessor for each selection
-                    pattern.selections.forEachIndexed { index, selection ->
-                        appendLine("    val ${selection.alias}: ${selection.kotlinType}")
-                        appendLine("        get() {")
-                        appendLine("            val selectable = selectables[$index]")
-                        appendLine("            val position = selectedColumns.size + $index + 1")
-                        appendLine("            return selectable.getValue(resultSet, position) as ${selection.kotlinType}")
-                        appendLine("        }")
                         appendLine()
                     }
 
@@ -1261,18 +1301,11 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                         return@forEach
                     }
 
-                    // Only generate execute() if pattern selects from ALL tables in the combination
-                    // This prevents ambiguity (e.g., don't generate Person_All execute() on Person_Order builder)
-                    val regularSelections = selectionList.filter { !it.startsWith("agg:") }
-                    val tablesInPattern = regularSelections.map { it.split(":")[0] }.toSet()
-                    if (tablesInPattern.size != tables.size) {
-                        return@forEach  // Pattern doesn't cover all tables - skip
-                    }
-
                     // Build type parameters - one for EACH table in the query
                     // Must match the builder class's type parameter count
                     // Group selections by table to handle multiple selections per table
                     // Note: Aggregate selections (agg:xxx) don't belong to any specific table
+                    val regularSelections = selectionList.filter { !it.startsWith("agg:") }
                     val selectionsByTable = regularSelections.groupBy { it.split(":")[0] }
 
                     val typeParams = mutableListOf<String>()
@@ -1309,20 +1342,34 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                         it.replaceFirstChar { ch -> ch.uppercase() }
                     }
 
-                    // Generate generic type parameter names (PersonSel, OrderSel, etc.) - one per table
-                    val genericParamNames = tables.map { "${it.replaceFirstChar { ch -> ch.uppercase() }}Sel" }
-                    val genericParams = genericParamNames.joinToString(", ")
-                    val genericParamsWithAC = "$genericParams, AC : com.obabichev.kodama.query.SelectionState"
+                    // Determine AC (aggregate count) type parameter from aggregate selections
+                    val aggregateSelections = selectionList.filter { it.startsWith("agg:") }
+                    val acType = when (aggregateSelections.size) {
+                        0 -> "AC"  // No aggregates, keep generic
+                        1 -> "com.obabichev.kodama.query.Has1Aggregate"
+                        2 -> "com.obabichev.kodama.query.Has2Aggregates"
+                        3 -> "com.obabichev.kodama.query.Has3Aggregates"
+                        4 -> "com.obabichev.kodama.query.Has4Aggregates"
+                        5 -> "com.obabichev.kodama.query.Has5Aggregates"
+                        else -> "AC"  // Fallback for >5 aggregates
+                    }
 
-                    // Builder receiver uses generic parameter names, NOT concrete types
-                    val receiverTypeArgs = genericParamNames.joinToString(", ") + ", AC"
+                    // Use CONCRETE types from typeParams and acType, not generic parameters
+                    // This ensures type safety: execute() only accepts the exact selection state
+                    val receiverTypeArgs = typeParams.joinToString(", ") + ", $acType"
+                    val genericParamsWithAC = if (acType == "AC") {
+                        "AC : com.obabichev.kodama.query.SelectionState"
+                    } else {
+                        ""  // No generic parameters needed
+                    }
 
                     appendLine("/**")
                     appendLine(" * Execute overload for selection: ${selectionList.joinToString(", ")}")
                     appendLine(" * Returns: $specificResultClassName (only selected accessors available)")
                     appendLine(" */")
                     appendLine("@JvmName(\"execute_$specificResultClassName\")")
-                    appendLine("fun <$genericParamsWithAC> $builderClassName<$receiverTypeArgs>.execute(transaction: com.obabichev.kodama.execute.JdbcTransaction): com.obabichev.kodama.query.QueryResultIterable<$specificResultClassName> {")
+                    val genericBrackets = if (genericParamsWithAC.isEmpty()) "" else "<$genericParamsWithAC> "
+                    appendLine("fun $genericBrackets$builderClassName<$receiverTypeArgs>.execute(transaction: com.obabichev.kodama.execute.JdbcTransaction): com.obabichev.kodama.query.QueryResultIterable<$specificResultClassName> {")
                     appendLine("    val query = this.build()")
                     appendLine("    val resultSet = transaction.execute(query)")
                     appendLine("    return com.obabichev.kodama.query.QueryResultIterable(resultSet, query.relations) { rs, relations ->")
@@ -1408,6 +1455,868 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
         val totalColumnPatterns = selectionPatterns.values.sumOf { it.size }
         val totalSelectionPatterns = selectionPatternsByTable.values.sumOf { it.size }
-        logger.lifecycle("Kodama: Generated ${tables.size} tables, ${queryCombinations.size} query combinations, $totalColumnPatterns column patterns, $totalSelectionPatterns selection patterns")
+
+        // Phase 5: Generate Entity Bindings
+        val generatedBindings = generateEntityBindings()
+
+        logger.lifecycle("Kodama: Generated ${tables.size} tables, ${queryCombinations.size} query combinations, $totalColumnPatterns column patterns, $totalSelectionPatterns selection patterns, $generatedBindings entity bindings")
     }
+
+    // Phase 5: Data classes for entity binding generation
+    private data class EntityTableInfo(
+        val tableName: String,  // e.g., "Users"
+        val entityType: String,  // e.g., "User"
+        val properties: List<String>,  // Property names (e.g., "userId")
+        val propertyTypes: Map<String, String>,  // Property name -> Kotlin type
+        val columnNames: Map<String, String>,  // Property name -> DB column name (e.g., "userId" -> "user_id")
+        val primaryKey: String?,  // Primary key property name
+        val packageName: String  // Package where EntityTable is defined
+    )
+
+    private data class InterfaceInfo(
+        val name: String,  // e.g., "User"
+        val properties: List<Pair<String, String>>,  // Property name -> type (with nullability)
+        val packageName: String,
+        val relationshipMethods: List<RelationshipMethodInfo> = emptyList()
+    )
+
+    private data class RelationshipMethodInfo(
+        val name: String,  // e.g., "orders"
+        val returnType: String,  // e.g., "List<UserOrder>" or "User"
+        val hasContextReceiver: Boolean  // true if context(EntitySession) is present
+    )
+
+    /**
+     * Phase 5: Scan for EntityTable<E> objects and interface entities, match them, and generate EntityBindings.
+     */
+    private fun generateEntityBindings(): Int {
+        // Step 1: Scan for EntityTable<E> definitions
+
+        val entityTables = mutableListOf<EntityTableInfo>()
+
+        val schemaFiles = schemaDir.get().asFile.walkTopDown().filter { it.extension == "kt" }
+        schemaFiles.forEach { file ->
+            val content = file.readText()
+
+            // Extract package
+            val packagePattern = """package\s+([\w.]+)""".toRegex()
+            val packageMatch = packagePattern.find(content)
+            val tablePackageName = packageMatch?.groupValues?.get(1) ?: ""
+
+            // Match: object TableName : EntityTable<EntityType>("table_name") { ... }
+            val entityTablePattern = """object\s+(\w+)\s*:\s*EntityTable<(\w+)>\s*\([^)]*\)\s*\{([^}]*)\}""".toRegex()
+            entityTablePattern.findAll(content).forEach { match ->
+                val tableName = match.groupValues[1]  // e.g., "Users"
+                val entityType = match.groupValues[2]  // e.g., "User"
+                val tableBody = match.groupValues[3]
+
+                // Extract properties (columns)
+                // Pattern matches: val propName = typeMethod("column_name", ...)
+                val propertyPattern = """val\s+(\w+)\s*=\s*(\w+)\s*\(\s*"([^"]+)"[^)]*\)([^\n]*)""".toRegex()
+                val properties = mutableListOf<String>()
+                val propertyTypes = mutableMapOf<String, String>()
+                val columnNames = mutableMapOf<String, String>()
+                var primaryKey: String? = null
+
+                propertyPattern.findAll(tableBody).forEach { propMatch ->
+                    val propName = propMatch.groupValues[1]       // e.g., "userId"
+                    val typeMethod = propMatch.groupValues[2]     // e.g., "integer"
+                    val columnName = propMatch.groupValues[3]     // e.g., "user_id"
+                    val modifiers = propMatch.groupValues[4]
+
+                    properties.add(propName)
+                    columnNames[propName] = columnName
+
+                    // Map to Kotlin type
+                    val kotlinType = when (typeMethod) {
+                        "varchar", "text" -> "String"
+                        "integer" -> "Int"
+                        "smallint" -> "Short"
+                        "bigint" -> "Long"
+                        "long" -> "Long"
+                        "decimal" -> "java.math.BigDecimal"
+                        "bigDecimal" -> "java.math.BigDecimal"
+                        "real", "float" -> "Float"
+                        "doublePrecision", "double" -> "Double"
+                        "boolean" -> "Boolean"
+                        "timestamp", "date" -> "java.time.LocalDateTime"
+                        else -> "Any"
+                    }
+                    propertyTypes[propName] = kotlinType
+
+                    // Check if primary key
+                    if (modifiers.contains(".primaryKey()")) {
+                        primaryKey = propName
+                    }
+                }
+
+                entityTables.add(EntityTableInfo(tableName, entityType, properties, propertyTypes, columnNames, primaryKey, tablePackageName))
+            }
+        }
+
+        // Step 2: Scan for interface definitions
+        val interfaces = mutableListOf<InterfaceInfo>()
+
+        val entityFiles = schemaDir.get().asFile.walkTopDown().filter { it.extension == "kt" }
+        entityFiles.forEach { file ->
+            val content = file.readText()
+
+            // Extract package
+            val packagePattern = """package\s+([\w.]+)""".toRegex()
+            val packageMatch = packagePattern.find(content)
+            val packageName = packageMatch?.groupValues?.get(1) ?: ""
+
+            // Pattern: interface EntityName { ... }
+            // Use a more robust pattern that handles multi-line interfaces
+            val interfacePattern = """interface\s+(\w+)\s*\{""".toRegex()
+            val interfaceMatches = interfacePattern.findAll(content).toList()
+
+            interfaceMatches.forEach { match ->
+                val interfaceName = match.groupValues[1]
+                val startIndex = match.range.last + 1
+
+                // Find matching closing brace
+                var braceCount = 1
+                var endIndex = startIndex
+                while (endIndex < content.length && braceCount > 0) {
+                    when (content[endIndex]) {
+                        '{' -> braceCount++
+                        '}' -> braceCount--
+                    }
+                    endIndex++
+                }
+
+                val interfaceBody = content.substring(startIndex, endIndex - 1)
+
+                // Extract properties
+                val propPattern = """val\s+(\w+)\s*:\s*([^=\n]+)""".toRegex()
+                val properties = propPattern.findAll(interfaceBody)
+                    .map {
+                        val propName = it.groupValues[1]
+                        // Remove inline comments and trim
+                        val propType = it.groupValues[2]
+                            .substringBefore("//")  // Remove inline comments
+                            .trim()
+                        propName to propType
+                    }
+                    .toList()
+
+                // Extract relationship methods with context parameters
+                // Pattern: context(session: EntitySession) fun methodName(): ReturnType
+                val methodPattern = """context\s*\(\s*session\s*:\s*EntitySession\s*\)\s*fun\s+(\w+)\s*\(\s*\)\s*:\s*([^\n{]+)""".toRegex()
+                val relationshipMethods = methodPattern.findAll(interfaceBody)
+                    .map {
+                        val methodName = it.groupValues[1]
+                        val returnType = it.groupValues[2].trim()
+                        RelationshipMethodInfo(methodName, returnType, hasContextReceiver = true)
+                    }
+                    .toList()
+
+                interfaces.add(InterfaceInfo(interfaceName, properties, packageName, relationshipMethods))
+            }
+        }
+
+        // Step 3: Match EntityTables with interfaces
+        val matches = mutableListOf<Pair<EntityTableInfo, InterfaceInfo>>()
+        entityTables.forEach { table ->
+            val interfaceEntity = interfaces.find { it.name == table.entityType }
+            if (interfaceEntity != null) {
+                matches.add(table to interfaceEntity)
+            }
+        }
+
+        // Step 4: Scan for relationship declarations
+        val relationships = scanRelationshipDeclarations(matches, schemaFiles)
+
+        // Step 5: Generate code for each match
+        matches.forEach { (table, interface_) ->
+            // Get relationships for this entity
+            val entityRelationships = relationships.filter { it.sourceEntity == table.entityType }
+
+            // Generate implementation + factory for interface
+            generateInterfaceImplementation(
+                entityType = table.entityType,
+                properties = interface_.properties,
+                entityPackageName = interface_.packageName,
+                relationshipMethods = interface_.relationshipMethods,
+                tableName = table.tableName,
+                relationships = entityRelationships
+            )
+
+            // Generate EntityBinding
+            generateEntityBinding(
+                tableName = table.tableName,
+                entityType = table.entityType,
+                properties = table.properties,
+                propertyTypes = table.propertyTypes,
+                columnNames = table.columnNames,
+                primaryKey = table.primaryKey,
+                entityPackageName = interface_.packageName,
+                tablePackageName = table.packageName
+            )
+        }
+
+        // Step 5: Generate entity companion extensions
+        // DISABLED: Using reified generics instead (session.find<User>(id))
+        // matches.forEach { (table, dataClass) ->
+        //     generateEntityExtensions(
+        //         tableName = table.tableName,
+        //         entityType = table.entityType,
+        //         primaryKey = table.primaryKey,
+        //         primaryKeyType = table.propertyTypes[table.primaryKey] ?: "Int",
+        //         entityPackageName = dataClass.packageName,
+        //         tablePackageName = table.packageName
+        //     )
+        // }
+
+        // Step 6: Generate binding registry
+        if (matches.isNotEmpty()) {
+            generateBindingRegistry(matches)
+        }
+
+        // Step 7: Generate relationship extension functions
+        // DISABLED: Relationship methods are now generated in *Impl classes
+        // if (matches.isNotEmpty()) {
+        //     generateRelationshipExtensions(matches, schemaFiles)
+        // }
+
+        return matches.size
+    }
+
+    /**
+     * Generate implementation class and factory function for interface-based entities.
+     */
+    private fun generateInterfaceImplementation(
+        entityType: String,
+        properties: List<Pair<String, String>>,
+        entityPackageName: String,
+        relationshipMethods: List<RelationshipMethodInfo> = emptyList(),
+        tableName: String,
+        relationships: List<RelationshipDeclaration> = emptyList()
+    ) {
+        val implName = "${entityType}Impl"
+        val outputFile = outputDir.get().asFile.resolve(
+            "${entityPackageName.replace('.', '/')}/impl/$implName.kt"
+        )
+        outputFile.parentFile.mkdirs()
+
+        outputFile.writeText(buildString {
+            appendLine("// Generated by Kodama Code Generator - Interface Implementation")
+            appendLine("// DO NOT EDIT: This file is automatically generated")
+            appendLine()
+            appendLine("package $entityPackageName.impl")
+            appendLine()
+            appendLine("import $entityPackageName.$entityType")
+            if (relationshipMethods.isNotEmpty()) {
+                appendLine("import com.obabichev.kodama.entity.EntitySession")
+
+                // Import target entity types
+                relationships.forEach { rel ->
+                    appendLine("import $entityPackageName.${rel.targetEntity}")
+                }
+
+                // Import table objects
+                relationships.forEach { rel ->
+                    appendLine("import ${rel.tablePackage}.${rel.targetTable}")
+                }
+            }
+            appendLine()
+
+            // Internal data class implementation
+            appendLine("/**")
+            appendLine(" * Internal implementation of $entityType interface.")
+            appendLine(" * Provides data class features (copy, equals, hashCode) and relationship methods.")
+            appendLine(" */")
+            appendLine("internal data class $implName(")
+            properties.forEachIndexed { index, (propName, propType) ->
+                val comma = if (index < properties.size - 1) "," else ""
+                appendLine("    override val $propName: $propType$comma")
+            }
+
+            if (relationshipMethods.isNotEmpty()) {
+                appendLine(") : $entityType {")
+                appendLine()
+
+                // Generate relationship method implementations
+                relationshipMethods.forEach { method ->
+                    // Find matching relationship declaration
+                    val relationship = relationships.find { it.relationshipName == method.name }
+                    if (relationship != null) {
+                        appendLine("    /**")
+                        appendLine("     * ${method.name} relationship - loads related ${relationship.targetEntity} ${if (relationship.type == RelationshipType.ONE_TO_MANY) "entities" else "entity"}.")
+                        appendLine("     */")
+                        appendLine("    context(session: EntitySession)")
+                        appendLine("    override fun ${method.name}(): ${method.returnType} {")
+
+                        when (relationship.type) {
+                            RelationshipType.ONE_TO_MANY -> {
+                                // One-to-many: find all children by foreign key
+                                appendLine("        return session.findByForeignKey<${relationship.targetEntity}, Int, Int>(")
+                                appendLine("            ${relationship.targetTable}, ${relationship.targetTable}.${relationship.foreignKeyColumn}, this.id")
+                                appendLine("        )")
+                            }
+                            RelationshipType.MANY_TO_ONE -> {
+                                // Many-to-one: find parent by ID
+                                appendLine("        return session.find<${relationship.targetEntity}>(this.${relationship.foreignKeyColumn})!!")
+                            }
+                        }
+
+                        appendLine("    }")
+                        appendLine()
+                    }
+                }
+                appendLine("}")
+            } else {
+                appendLine(") : $entityType")
+            }
+            appendLine()
+
+            // Factory function
+            appendLine("/**")
+            appendLine(" * Factory function to create $entityType instances.")
+            appendLine(" */")
+            appendLine("fun $entityType(")
+            properties.forEachIndexed { index, (propName, propType) ->
+                val comma = if (index < properties.size - 1) "," else ""
+                appendLine("    $propName: $propType$comma")
+            }
+            appendLine("): $entityType = $implName(")
+            properties.forEachIndexed { index, (propName, _) ->
+                val comma = if (index < properties.size - 1) "," else ""
+                appendLine("    $propName = $propName$comma")
+            }
+            appendLine(")")
+            appendLine()
+
+            // Copy extension function
+            appendLine("/**")
+            appendLine(" * Copy extension function for $entityType interface.")
+            appendLine(" * Delegates to the underlying data class copy method.")
+            appendLine(" */")
+            appendLine("fun $entityType.copy(")
+            properties.forEachIndexed { index, (propName, propType) ->
+                val comma = if (index < properties.size - 1) "," else ""
+                appendLine("    $propName: $propType = this.$propName$comma")
+            }
+            appendLine("): $entityType {")
+            appendLine("    return (this as $implName).copy(")
+            properties.forEachIndexed { index, (propName, _) ->
+                val comma = if (index < properties.size - 1) "," else ""
+                appendLine("        $propName = $propName$comma")
+            }
+            appendLine("    )")
+            appendLine("}")
+        })
+
+        logger.lifecycle("Kodama: Generated interface implementation: $implName.kt")
+    }
+
+    /**
+     * Generate EntityBinding implementation for a matched EntityTable and data class.
+     */
+    private fun generateEntityBinding(
+        tableName: String,
+        entityType: String,
+        properties: List<String>,
+        propertyTypes: Map<String, String>,
+        columnNames: Map<String, String>,
+        primaryKey: String?,
+        entityPackageName: String,
+        tablePackageName: String
+    ) {
+        val bindingName = "${entityType}EntityBinding"
+        val outputFile = outputDir.get().asFile.resolve("${entityPackageName.replace('.', '/')}/bindings/$bindingName.kt")
+
+        outputFile.parentFile.mkdirs()
+
+        val pkName = primaryKey ?: properties.firstOrNull() ?: "id"
+        val pkType = propertyTypes[pkName] ?: "Int"
+
+        // Determine the registry package (parent of entity package)
+        val registryPackage = entityPackageName.substringBeforeLast(".", entityPackageName)
+
+        outputFile.writeText(buildString {
+            appendLine("// Generated by Kodama Code Generator - Phase 5")
+            appendLine("// DO NOT EDIT: This file is automatically generated")
+            appendLine()
+            appendLine("package $entityPackageName.bindings")
+            appendLine()
+            appendLine("import com.obabichev.kodama.components.Column")
+            appendLine("import com.obabichev.kodama.entity.EntityBinding")
+            appendLine("import $entityPackageName.$entityType")
+            appendLine("import $entityPackageName.impl.$entityType")  // Factory function
+            appendLine("import $tablePackageName.$tableName")
+            appendLine("import java.sql.ResultSet")
+            appendLine("import $registryPackage.KodamaBindingRegistry")
+            appendLine()
+            appendLine("// Ensure the registry is loaded to enable auto-registration")
+            appendLine("private val _initRegistry = KodamaBindingRegistry")
+            appendLine()
+            appendLine("/**")
+            appendLine(" * Generated EntityBinding for $entityType ↔ $tableName.")
+            appendLine(" *")
+            appendLine(" * Maps between:")
+            appendLine(" * - Entity: $entityType (interface)")
+            appendLine(" * - Table: $tableName (EntityTable)")
+            appendLine(" *")
+            appendLine(" * Generated methods:")
+            appendLine(" * - toEntity: ResultSet → $entityType")
+            appendLine(" * - toInsertValues: $entityType → Map<Column<*>, Any?>")
+            appendLine(" * - toUpdateValues: Detect changes and return only modified fields")
+            appendLine(" * - entityId: Extract primary key ($pkName)")
+            appendLine(" * - primaryKeyColumns: Return primary key columns")
+            appendLine(" */")
+            appendLine("object $bindingName : EntityBinding<$entityType, $pkType> {")
+            appendLine()
+            appendLine("    override val table = $tableName")
+            appendLine()
+            appendLine("    override fun entityId(entity: $entityType): $pkType {")
+            appendLine("        return entity.$pkName")
+            appendLine("    }")
+            appendLine()
+            appendLine("    override fun toEntity(resultSet: ResultSet): $entityType {")
+            appendLine("        return $entityType(")
+
+            // Generate property mapping from ResultSet
+            properties.forEachIndexed { index, propName ->
+                val propType = propertyTypes[propName] ?: "Any"
+                val columnName = columnNames[propName] ?: propName  // Use DB column name
+                val getter = when (propType) {
+                    "String" -> "resultSet.getString(\"$columnName\")"
+                    "Int" -> "resultSet.getInt(\"$columnName\")"
+                    "Long" -> "resultSet.getLong(\"$columnName\")"
+                    "Short" -> "resultSet.getShort(\"$columnName\")"
+                    "Float" -> "resultSet.getFloat(\"$columnName\")"
+                    "Double" -> "resultSet.getDouble(\"$columnName\")"
+                    "Boolean" -> "resultSet.getBoolean(\"$columnName\")"
+                    "java.math.BigDecimal" -> "resultSet.getBigDecimal(\"$columnName\")"
+                    else -> "resultSet.getObject(\"$columnName\") as $propType"
+                }
+                val comma = if (index < properties.size - 1) "," else ""
+                appendLine("            $propName = $getter$comma")
+            }
+
+            appendLine("        )")
+            appendLine("    }")
+            appendLine()
+            appendLine("    override fun toInsertValues(entity: $entityType): Map<Column<*>, Any?> {")
+            appendLine("        return mapOf(")
+
+            // Generate column mappings
+            val insertMappings = properties.mapIndexed { index, propName ->
+                val comma = if (index < properties.size - 1) "," else ""
+                "            $tableName.$propName to entity.$propName$comma"
+            }
+            insertMappings.forEach { appendLine(it) }
+
+            appendLine("        )")
+            appendLine("    }")
+            appendLine()
+            appendLine("    override fun toUpdateValues(entity: $entityType, original: $entityType): Map<Column<*>, Any?> {")
+            appendLine("        val changes = mutableMapOf<Column<*>, Any?>()")
+            appendLine()
+
+            // Generate field-by-field comparison (exclude primary key)
+            val nonPkProperties = properties.filter { it != pkName }
+            nonPkProperties.forEach { propName ->
+                appendLine("        if (entity.$propName != original.$propName) {")
+                appendLine("            changes[$tableName.$propName] = entity.$propName")
+                appendLine("        }")
+                appendLine()
+            }
+
+            appendLine("        return changes")
+            appendLine("    }")
+            appendLine()
+            appendLine("    override fun primaryKeyColumns(): List<Column<*>> {")
+            appendLine("        return listOf($tableName.$pkName)")
+            appendLine("    }")
+            appendLine("}")
+            appendLine()
+        })
+    }
+
+    /**
+     * Generate companion object extension functions for entity operations.
+     * Allows usage like: User.find(session, id) instead of session.find(Users, id)
+     */
+    private fun generateEntityExtensions(
+        tableName: String,
+        entityType: String,
+        primaryKey: String?,
+        primaryKeyType: String,
+        entityPackageName: String,
+        tablePackageName: String
+    ) {
+        val pkName = primaryKey ?: "id"
+        val extensionsFile = outputDir.get().asFile.resolve("${entityPackageName.replace('.', '/')}/extensions/${entityType}Extensions.kt")
+        extensionsFile.parentFile.mkdirs()
+
+        extensionsFile.writeText(buildString {
+            appendLine("// Generated by Kodama Code Generator - Phase 5")
+            appendLine("// DO NOT EDIT: This file is automatically generated")
+            appendLine()
+            appendLine("package $entityPackageName.extensions")
+            appendLine()
+            appendLine("import com.obabichev.kodama.entity.EntitySession")
+            appendLine("import $entityPackageName.$entityType")
+            appendLine("import $tablePackageName.$tableName")
+            appendLine()
+            appendLine("/**")
+            appendLine(" * Companion object extensions for $entityType entity.")
+            appendLine(" * Provides convenient static-like methods for database operations.")
+            appendLine(" */")
+            appendLine()
+            appendLine("/**")
+            appendLine(" * Find an entity by its primary key.")
+            appendLine(" * ")
+            appendLine(" * Usage: val user = User.find(session, 1)")
+            appendLine(" */")
+            appendLine("fun $entityType.Companion.find(session: EntitySession, id: $primaryKeyType): $entityType? {")
+            appendLine("    return session.find($tableName, id)")
+            appendLine("}")
+            appendLine()
+            appendLine("/**")
+            appendLine(" * Save a new entity (stages for INSERT on next flush).")
+            appendLine(" * ")
+            appendLine(" * Usage: User.save(session, user)")
+            appendLine(" */")
+            appendLine("fun $entityType.Companion.save(session: EntitySession, entity: $entityType) {")
+            appendLine("    session.save<$entityType, $primaryKeyType>(entity)")
+            appendLine("}")
+            appendLine()
+            appendLine("/**")
+            appendLine(" * Delete an entity (stages for DELETE on next flush).")
+            appendLine(" * ")
+            appendLine(" * Usage: User.delete(session, user)")
+            appendLine(" */")
+            appendLine("fun $entityType.Companion.delete(session: EntitySession, entity: $entityType) {")
+            appendLine("    session.delete<$entityType, $primaryKeyType>(entity)")
+            appendLine("}")
+            appendLine()
+        })
+    }
+
+    /**
+     * Generate a binding registry that EntitySession can use to auto-register bindings.
+     */
+    private fun generateBindingRegistry(matches: List<Pair<EntityTableInfo, InterfaceInfo>>) {
+        val typedMatches = matches
+
+        // Use a common parent package for the registry (e.g., first entity's parent package)
+        val firstEntityPackage = typedMatches.first().second.packageName
+        val registryPackage = firstEntityPackage.substringBeforeLast(".", firstEntityPackage)
+
+        val registryFile = outputDir.get().asFile.resolve("${registryPackage.replace('.', '/')}/KodamaBindingRegistry.kt")
+        registryFile.parentFile.mkdirs()
+
+        registryFile.writeText(buildString {
+            appendLine("// Generated by Kodama Code Generator - Phase 5")
+            appendLine("// DO NOT EDIT: This file is automatically generated")
+            appendLine()
+            appendLine("package $registryPackage")
+            appendLine()
+            appendLine("import com.obabichev.kodama.entity.EntityBinding")
+            appendLine("import com.obabichev.kodama.entity.EntitySession")
+            appendLine("import com.obabichev.kodama.schema.EntityTable")
+            appendLine("import kotlin.reflect.KClass")
+            appendLine()
+
+            // Import all bindings and entity types
+            typedMatches.forEach { (table, interface_) ->
+                appendLine("import ${interface_.packageName}.${interface_.name}")
+                appendLine("import ${interface_.packageName}.impl.${interface_.name}")  // Factory
+                appendLine("import ${interface_.packageName}.impl.${interface_.name}Impl")  // Implementation class
+                appendLine("import ${interface_.packageName}.bindings.${interface_.name}EntityBinding")
+                appendLine("import ${table.packageName}.${table.tableName}")
+            }
+            appendLine()
+
+            appendLine("/**")
+            appendLine(" * Auto-generated registry of all EntityBindings.")
+            appendLine(" *")
+            appendLine(" * This registry is automatically consulted by EntitySession to")
+            appendLine(" * eliminate the need for manual binding registration.")
+            appendLine(" *")
+            appendLine(" * Generated bindings:")
+            typedMatches.forEach { (table, interface_) ->
+                appendLine(" * - ${interface_.name} ↔ ${table.tableName}")
+            }
+            appendLine(" */")
+            appendLine("object KodamaBindingRegistry {")
+            appendLine()
+            appendLine("    init {")
+            appendLine("        // Register this registry as the auto-binding provider for EntitySession")
+            appendLine("        EntitySession.autoBindingProvider = { entityClass ->")
+            appendLine("            @Suppress(\"UNCHECKED_CAST\")")
+            appendLine("            getBinding<Any, Any>(entityClass as KClass<Any>)")
+            appendLine("        }")
+            appendLine("    }")
+            appendLine()
+            appendLine("    /**")
+            appendLine("     * Get binding for an entity type, or null if not found.")
+            appendLine("     */")
+            appendLine("    fun <E : Any, ID : Any> getBinding(entityClass: KClass<E>): EntityBinding<E, ID>? {")
+            appendLine("        @Suppress(\"UNCHECKED_CAST\")")
+            appendLine("        return when (entityClass) {")
+
+            typedMatches.forEach { (table, interface_) ->
+                appendLine("            ${interface_.name}::class -> ${interface_.name}EntityBinding as EntityBinding<E, ID>")
+                appendLine("            ${interface_.name}Impl::class -> ${interface_.name}EntityBinding as EntityBinding<E, ID>")
+            }
+
+            appendLine("            else -> null")
+            appendLine("        }")
+            appendLine("    }")
+            appendLine()
+            appendLine("    /**")
+            appendLine("     * Auto-register all bindings in an EntitySession.")
+            appendLine("     */")
+            appendLine("    fun registerAll(session: EntitySession) {")
+
+            typedMatches.forEach { (table, interface_) ->
+                appendLine("        session.registerBinding(${table.tableName}, ${interface_.name}EntityBinding)")
+            }
+
+            appendLine("    }")
+            appendLine("}")
+            appendLine()
+        })
+    }
+
+    /**
+     * Type of relationship.
+     */
+    private enum class RelationshipType {
+        ONE_TO_MANY,
+        MANY_TO_ONE
+    }
+
+    /**
+     * Data class for relationship information from oneToMany and manyToOne declarations.
+     */
+    private data class RelationshipDeclaration(
+        val type: RelationshipType,     // ONE_TO_MANY or MANY_TO_ONE
+        val sourceEntity: String,       // e.g., "User" or "UserOrder"
+        val relationshipName: String,   // e.g., "orders" or "user"
+        val targetEntity: String,       // e.g., "UserOrder" or "User"
+        val targetTable: String,        // e.g., "UserOrders" or "Users"
+        val foreignKeyColumn: String,   // e.g., "userId" (column in source or target table)
+        val tablePackage: String        // e.g., "com.obabichev.kodama.tests.schema"
+    )
+
+    /**
+     * Scan schema files for relationship declarations.
+     */
+    private fun scanRelationshipDeclarations(
+        matches: List<Pair<EntityTableInfo, InterfaceInfo>>,
+        schemaFiles: Sequence<java.io.File>
+    ): List<RelationshipDeclaration> {
+        val entityToTableMap = mutableMapOf<String, String>()
+        val relationships = mutableListOf<RelationshipDeclaration>()
+
+        // Build table name to entity name map and table package map for lookup
+        val tableToEntityName = matches.associate { (table, interface_) ->
+            table.tableName.lowercase() to interface_.name
+        }
+        val tableToPackage = matches.associate { (table, _) ->
+            table.tableName to table.packageName
+        }
+
+        // Scan schema files for EntityTable definitions and oneToMany declarations
+        schemaFiles.forEach { file ->
+            val content = file.readText()
+
+            // Extract package from file
+            val packagePattern = """package\s+([\w.]+)""".toRegex()
+            val packageMatch = packagePattern.find(content)
+            val filePackage = packageMatch?.groupValues?.get(1) ?: ""
+
+            // Pattern: object TableName : EntityTable<EntityType>(...)
+            val entityTablePattern = """object\s+(\w+)\s*:\s*EntityTable<(\w+)>""".toRegex()
+            entityTablePattern.findAll(content).forEach { match ->
+                val tableName = match.groupValues[1]
+                val entityType = match.groupValues[2]
+                entityToTableMap[entityType] = tableName
+            }
+
+            // Pattern: oneToMany("relationshipName", TargetTable, TargetTable.fkColumn, this.pkColumn)
+            val oneToManyPattern = """oneToMany\s*\(\s*"([^"]+)"\s*,\s*(\w+)\s*,\s*(\w+)\.(\w+)\s*,\s*this\.(\w+)\s*\)""".toRegex()
+            oneToManyPattern.findAll(content).forEach { match ->
+                val relationshipName = match.groupValues[1]
+                val targetTableName = match.groupValues[2]
+                val fkColumnName = match.groupValues[4]
+
+                // Find source entity - look for the EntityTable that contains this oneToMany call
+                val sourceTablePattern = """object\s+(\w+)\s*:\s*EntityTable<(\w+)>\s*\([^)]*\)\s*\{[^}]*init\s*\{[^}]*oneToMany\s*\(\s*"$relationshipName"""".toRegex()
+                sourceTablePattern.find(content)?.let { tableMatch ->
+                    val sourceEntityName = tableMatch.groupValues[2]
+                    val targetEntity = tableToEntityName[targetTableName.lowercase()] ?: "Unknown"
+                    val targetPackage = tableToPackage[targetTableName] ?: filePackage
+
+                    relationships.add(
+                        RelationshipDeclaration(
+                            type = RelationshipType.ONE_TO_MANY,
+                            sourceEntity = sourceEntityName,
+                            relationshipName = relationshipName,
+                            targetEntity = targetEntity,
+                            targetTable = targetTableName,
+                            foreignKeyColumn = fkColumnName,
+                            tablePackage = targetPackage
+                        )
+                    )
+                }
+            }
+
+            // Pattern: manyToOne("relationshipName", TargetTable, this.fkColumn, TargetTable.pkColumn)
+            val manyToOnePattern = """manyToOne\s*\(\s*"([^"]+)"\s*,\s*(\w+)\s*,\s*this\.(\w+)\s*,\s*(\w+)\.(\w+)\s*\)""".toRegex()
+            manyToOnePattern.findAll(content).forEach { match ->
+                val relationshipName = match.groupValues[1]
+                val targetTableName = match.groupValues[2]
+                val fkColumnName = match.groupValues[3]
+
+                // Find source entity - look for the EntityTable that contains this manyToOne call
+                val sourceTablePattern = """object\s+(\w+)\s*:\s*EntityTable<(\w+)>\s*\([^)]*\)\s*\{[^}]*init\s*\{[^}]*manyToOne\s*\(\s*"$relationshipName"""".toRegex()
+                sourceTablePattern.find(content)?.let { tableMatch ->
+                    val sourceEntityName = tableMatch.groupValues[2]
+                    val targetEntity = tableToEntityName[targetTableName.lowercase()] ?: "Unknown"
+                    val targetPackage = tableToPackage[targetTableName] ?: filePackage
+
+                    relationships.add(
+                        RelationshipDeclaration(
+                            type = RelationshipType.MANY_TO_ONE,
+                            sourceEntity = sourceEntityName,
+                            relationshipName = relationshipName,
+                            targetEntity = targetEntity,
+                            targetTable = targetTableName,
+                            foreignKeyColumn = fkColumnName,
+                            tablePackage = targetPackage
+                        )
+                    )
+                }
+            }
+        }
+
+        return relationships
+    }
+
+    /**
+     * Generate relationship extension functions.
+     * This scans EntityTable oneToMany declarations to generate relationship accessors.
+     */
+    private fun generateRelationshipExtensions(
+        matches: List<Pair<EntityTableInfo, InterfaceInfo>>,
+        schemaFiles: Sequence<java.io.File>
+    ) {
+        // Build a map of entity name to EntityTable name
+        val entityToTableMap = mutableMapOf<String, String>()
+        val relationships = mutableListOf<RelationshipDeclaration>()
+
+        // Build table name to entity name map and table package map for lookup
+        val tableToEntityName = matches.associate { (table, interface_) ->
+            table.tableName.lowercase() to interface_.name
+        }
+        val tableToPackage = matches.associate { (table, _) ->
+            table.tableName to table.packageName
+        }
+
+        // Scan schema files for EntityTable definitions and oneToMany declarations
+        schemaFiles.forEach { file ->
+            val content = file.readText()
+
+            // Extract package from file
+            val packagePattern = """package\s+([\w.]+)""".toRegex()
+            val packageMatch = packagePattern.find(content)
+            val filePackage = packageMatch?.groupValues?.get(1) ?: ""
+
+            // Pattern: object TableName : EntityTable<EntityType>(...)
+            val entityTablePattern = """object\s+(\w+)\s*:\s*EntityTable<(\w+)>""".toRegex()
+            entityTablePattern.findAll(content).forEach { match ->
+                val tableName = match.groupValues[1]
+                val entityType = match.groupValues[2]
+                entityToTableMap[entityType] = tableName
+            }
+
+            // Pattern: oneToMany("relationshipName", TargetTable, TargetTable.fkColumn, this.pkColumn)
+            val oneToManyPattern = """oneToMany\s*\(\s*"([^"]+)"\s*,\s*(\w+)\s*,\s*(\w+)\.(\w+)\s*,\s*this\.(\w+)\s*\)""".toRegex()
+            oneToManyPattern.findAll(content).forEach { match ->
+                val relationshipName = match.groupValues[1]
+                val targetTableName = match.groupValues[2]
+                val fkColumnName = match.groupValues[4]
+
+                // Find source entity - look for the EntityTable that contains this oneToMany call
+                val sourceTablePattern = """object\s+(\w+)\s*:\s*EntityTable<(\w+)>\s*\([^)]*\)\s*\{[^}]*init\s*\{[^}]*oneToMany\s*\(\s*"$relationshipName"""".toRegex()
+                sourceTablePattern.find(content)?.let { tableMatch ->
+                    val sourceEntityName = tableMatch.groupValues[2]
+                    val targetEntity = tableToEntityName[targetTableName.lowercase()] ?: "Unknown"
+                    val targetPackage = tableToPackage[targetTableName] ?: filePackage
+
+                    relationships.add(
+                        RelationshipDeclaration(
+                            type = RelationshipType.ONE_TO_MANY,
+                            sourceEntity = sourceEntityName,
+                            relationshipName = relationshipName,
+                            targetEntity = targetEntity,
+                            targetTable = targetTableName,
+                            foreignKeyColumn = fkColumnName,
+                            tablePackage = targetPackage
+                        )
+                    )
+                }
+            }
+        }
+
+        if (relationships.isEmpty()) {
+            return
+        }
+
+        // Generate a single file with all relationship extensions
+        val firstEntityPackage = matches.first().second.packageName
+        val relationshipFile = outputDir.get().asFile.resolve(
+            "${firstEntityPackage.replace('.', '/')}/RelationshipExtensions.kt"
+        )
+        relationshipFile.parentFile.mkdirs()
+
+        relationshipFile.writeText(buildString {
+            appendLine("// Generated by Kodama Code Generator")
+            appendLine("// DO NOT EDIT: Relationship extensions with context parameters")
+            appendLine()
+            appendLine("package $firstEntityPackage")
+            appendLine()
+            appendLine("import com.obabichev.kodama.entity.EntitySession")
+
+            // Import all entity types
+            val allEntityTypes = relationships.map { it.sourceEntity }.toSet() + relationships.map { it.targetEntity }.toSet()
+            allEntityTypes.forEach { entityType ->
+                appendLine("import $firstEntityPackage.$entityType")
+            }
+
+            // Import all EntityTables
+            matches.forEach { (table, _) ->
+                appendLine("import ${table.packageName}.${table.tableName}")
+            }
+
+            appendLine()
+
+            // Generate extension functions for each one-to-many relationship
+            relationships.forEach { rel ->
+                appendLine("/**")
+                appendLine(" * ${rel.relationshipName} relationship for ${rel.sourceEntity}.")
+                appendLine(" * Uses EntitySession from context parameter to load related entities.")
+                appendLine(" *")
+                appendLine(" * @return List of related ${rel.targetEntity} entities (may be empty)")
+                appendLine(" */")
+                appendLine("context(session: EntitySession)")
+                appendLine("fun ${rel.sourceEntity}.${rel.relationshipName}(): List<${rel.targetEntity}> {")
+                // Provide explicit type arguments to help with type inference
+                // Assuming Int for ID and FK types for now
+                appendLine("    return session.findByForeignKey<${rel.targetEntity}, Int, Int>(${rel.targetTable}, ${rel.targetTable}.${rel.foreignKeyColumn}, this.id)")
+                appendLine("}")
+                appendLine()
+            }
+        })
+
+        logger.lifecycle("Kodama: Generated relationship extensions with context parameters")
+    }
+
 }

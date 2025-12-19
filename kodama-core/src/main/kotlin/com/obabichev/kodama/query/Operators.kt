@@ -4,6 +4,11 @@ import com.obabichev.kodama.components.expression.BinaryOperand
 import com.obabichev.kodama.components.expression.ColumnExpression
 import com.obabichev.kodama.components.expression.Expression
 import com.obabichev.kodama.components.expression.QueryArgumentExpression
+import com.obabichev.kodama.components.expression.and
+import com.obabichev.kodama.components.expression.or
+import com.obabichev.kodama.components.expression.not
+
+// ========== Comparison Operators ==========
 
 /**
  * Infix eq operator for Column - used in typed where clauses
@@ -12,6 +17,51 @@ infix fun com.obabichev.kodama.components.Column<*>.eq(value: Any?): Expression 
     @Suppress("UNCHECKED_CAST")
     val argument = QueryArgumentExpression(value, this.type as com.obabichev.kodama.components.ColumnType<Any?>)
     return BinaryOperand("=", ColumnExpression(this), argument)
+}
+
+/**
+ * Infix neq (not equal) operator for Column
+ */
+infix fun com.obabichev.kodama.components.Column<*>.neq(value: Any?): Expression {
+    @Suppress("UNCHECKED_CAST")
+    val argument = QueryArgumentExpression(value, this.type as com.obabichev.kodama.components.ColumnType<Any?>)
+    return BinaryOperand("<>", ColumnExpression(this), argument)
+}
+
+/**
+ * Infix lt (less than) operator for Column
+ */
+infix fun com.obabichev.kodama.components.Column<*>.lt(value: Any?): Expression {
+    @Suppress("UNCHECKED_CAST")
+    val argument = QueryArgumentExpression(value, this.type as com.obabichev.kodama.components.ColumnType<Any?>)
+    return BinaryOperand("<", ColumnExpression(this), argument)
+}
+
+/**
+ * Infix lte (less than or equal) operator for Column
+ */
+infix fun com.obabichev.kodama.components.Column<*>.lte(value: Any?): Expression {
+    @Suppress("UNCHECKED_CAST")
+    val argument = QueryArgumentExpression(value, this.type as com.obabichev.kodama.components.ColumnType<Any?>)
+    return BinaryOperand("<=", ColumnExpression(this), argument)
+}
+
+/**
+ * Infix gt (greater than) operator for Column
+ */
+infix fun com.obabichev.kodama.components.Column<*>.gt(value: Any?): Expression {
+    @Suppress("UNCHECKED_CAST")
+    val argument = QueryArgumentExpression(value, this.type as com.obabichev.kodama.components.ColumnType<Any?>)
+    return BinaryOperand(">", ColumnExpression(this), argument)
+}
+
+/**
+ * Infix gte (greater than or equal) operator for Column
+ */
+infix fun com.obabichev.kodama.components.Column<*>.gte(value: Any?): Expression {
+    @Suppress("UNCHECKED_CAST")
+    val argument = QueryArgumentExpression(value, this.type as com.obabichev.kodama.components.ColumnType<Any?>)
+    return BinaryOperand(">=", ColumnExpression(this), argument)
 }
 
 /**
@@ -28,6 +78,41 @@ infix fun com.obabichev.kodama.components.Column<*>.eq(other: com.obabichev.koda
  */
 infix fun <T, TM, CM> com.obabichev.kodama.components.TypedColumn<T, TM, CM>.eq(value: Any?): Expression {
     return this.column.eq(value)
+}
+
+/**
+ * Infix neq operator for TypedColumn
+ */
+infix fun <T, TM, CM> com.obabichev.kodama.components.TypedColumn<T, TM, CM>.neq(value: Any?): Expression {
+    return this.column.neq(value)
+}
+
+/**
+ * Infix lt operator for TypedColumn
+ */
+infix fun <T, TM, CM> com.obabichev.kodama.components.TypedColumn<T, TM, CM>.lt(value: Any?): Expression {
+    return this.column.lt(value)
+}
+
+/**
+ * Infix lte operator for TypedColumn
+ */
+infix fun <T, TM, CM> com.obabichev.kodama.components.TypedColumn<T, TM, CM>.lte(value: Any?): Expression {
+    return this.column.lte(value)
+}
+
+/**
+ * Infix gt operator for TypedColumn
+ */
+infix fun <T, TM, CM> com.obabichev.kodama.components.TypedColumn<T, TM, CM>.gt(value: Any?): Expression {
+    return this.column.gt(value)
+}
+
+/**
+ * Infix gte operator for TypedColumn
+ */
+infix fun <T, TM, CM> com.obabichev.kodama.components.TypedColumn<T, TM, CM>.gte(value: Any?): Expression {
+    return this.column.gte(value)
 }
 
 /**

@@ -16,7 +16,11 @@ class JdbcTransaction(
     private val user: String,
     private val password: String
 ) : Transaction {
-    private val connection: Connection = DriverManager.getConnection(url, user, password).apply {
+    /**
+     * The JDBC connection used by this transaction.
+     * Exposed for use with EntitySession and other low-level database operations.
+     */
+    val connection: Connection = DriverManager.getConnection(url, user, password).apply {
         autoCommit = false
     }
 
@@ -43,6 +47,24 @@ class JdbcTransaction(
     fun executeUpdate(sql: String): Int {
         val statement = connection.createStatement()
         return statement.executeUpdate(sql)
+    }
+
+    /**
+     * Execute an UPDATE/INSERT/DELETE with parameters using a prepared statement.
+     * This is safe from SQL injection and efficient.
+     *
+     * @param sql SQL statement with ? placeholders
+     * @param params Parameters to bind to the placeholders
+     * @return Number of rows affected
+     */
+    fun executeUpdate(sql: String, vararg params: Any?): Int {
+        val preparedStatement = connection.prepareStatement(sql)
+        params.forEachIndexed { index, param ->
+            preparedStatement.setObject(index + 1, param)
+        }
+        val result = preparedStatement.executeUpdate()
+        preparedStatement.close()
+        return result
     }
 
     /**

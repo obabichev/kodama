@@ -1,6 +1,8 @@
-package com.obabichev.kodama.tests
+package com.obabichev.kodama.tests.dsl
 
 import com.obabichev.kodama.query.RelationsContainer
+import com.obabichev.kodama.schema.Table
+import com.obabichev.kodama.tests.infrastructure.DatabaseTest
 import com.obabichev.kodama.tests.schema.Company
 import com.obabichev.kodama.tests.schema.Person
 import com.obabichev.kodama.tests.data.*
@@ -9,7 +11,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
-class RelationsContainerTests {
+class RelationsContainerTests : DatabaseTest() {
+
+    override fun requiredTables(): List<Table> = listOf(Person, Company)
 
     @Test
     fun testRelationCaching() {

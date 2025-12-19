@@ -1,17 +1,27 @@
-package com.obabichev.kodama.tests
+package com.obabichev.kodama.tests.dsl
 
 import com.obabichev.kodama.query.query
 import com.obabichev.kodama.query.eq
+import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.tests.data.*
+import com.obabichev.kodama.tests.infrastructure.DatabaseTest
 import com.obabichev.kodama.tests.schema.Order
 import com.obabichev.kodama.tests.schema.Person
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-class QueryOrderByTests : PostgresBaseTest() {
+class QueryOrderByTests : DatabaseTest() {
+
+    override fun requiredTables(): List<Table> = listOf(Person, Order)
 
     @Test
     fun testOrderByAsc() {
+        testData {
+            person("kodama", age = 1)
+            person("kokoro", age = 2)
+            person("pipiru", age = 2)
+        }
+
         val queryBuilder = query()
             .from(Person)
             .selectAll(Person)
@@ -38,6 +48,12 @@ class QueryOrderByTests : PostgresBaseTest() {
 
     @Test
     fun testOrderByDesc() {
+        testData {
+            person("kodama", age = 1)
+            person("kokoro", age = 2)
+            person("pipiru", age = 2)
+        }
+
         val queryBuilder = query()
             .from(Person)
             .selectAll(Person)
@@ -63,6 +79,12 @@ class QueryOrderByTests : PostgresBaseTest() {
 
     @Test
     fun testOrderByMultipleColumns() {
+        testData {
+            person("kodama", age = 1)
+            person("kokoro", age = 2)
+            person("pipiru", age = 2)
+        }
+
         val queryBuilder = query()
             .from(Person)
             .selectAll(Person)
@@ -91,6 +113,12 @@ class QueryOrderByTests : PostgresBaseTest() {
 
     @Test
     fun testOrderByWithWhere() {
+        testData {
+            person("kodama", age = 1)
+            person("kokoro", age = 2)
+            person("pipiru", age = 2)
+        }
+
         val queryBuilder = query()
             .from(Person)
             .selectAll(Person)
@@ -114,6 +142,14 @@ class QueryOrderByTests : PostgresBaseTest() {
 
     @Test
     fun testOrderByWithJoin() {
+        testData {
+            person("kodama", age = 1)
+            person("kokoro", age = 2)
+            order(1, "kodama", "Laptop", 1000)
+            order(2, "kodama", "Mouse", 50)
+            order(3, "kokoro", "Keyboard", 100)
+        }
+
         val queryBuilder = query()
             .from(Person)
             .join(Order) {
@@ -145,6 +181,14 @@ class QueryOrderByTests : PostgresBaseTest() {
 
     @Test
     fun testOrderByMultipleColumnsWithJoin() {
+        testData {
+            person("kodama", age = 1)
+            person("kokoro", age = 2)
+            order(1, "kodama", "Laptop", 1000)
+            order(2, "kodama", "Mouse", 50)
+            order(3, "kokoro", "Keyboard", 100)
+        }
+
         val queryBuilder = query()
             .from(Person)
             .join(Order) {

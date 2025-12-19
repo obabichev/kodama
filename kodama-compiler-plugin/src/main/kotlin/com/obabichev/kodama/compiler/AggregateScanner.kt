@@ -29,19 +29,32 @@ class AggregateScanner : SelectionPatternScanner {
             val foundAliases = mutableSetOf<String>()
             val columnSelectionsByTable = mutableMapOf<String, MutableList<String>>()  // Track column selections by table
 
-            // New unified API pattern: .select_xxx { aggregate() } (alias inferred from method name)
-            // This is the preferred pattern - no explicit alias needed
-            val selectUnifiedSimplePattern = """\.select_(\w+)\s*\{[^}]+\}""".toRegex()
+            // New unified API pattern: .select_xxx { ... } (alias inferred from method name)
+            // This can be either aggregate or expression selection
+            val selectUnifiedSimplePattern = """\.select_(\w+)\s*\{([^}]+)\}""".toRegex()
             selectUnifiedSimplePattern.findAll(queryChain).forEach { match ->
                 val alias = match.groupValues[1]
+                val blockContent = match.groupValues[2]
+
                 // Only add if we haven't seen this alias yet (avoid duplicates)
                 if (!foundAliases.contains(alias)) {
                     foundAliases.add(alias)
+
+                    // Determine type based on block content
+                    val isAggregate = blockContent.contains(Regex("""(sum|count|avg|min|max|countAll)\s*\("""))
+                    val isExpression = blockContent.contains(Regex("""\s+(gt|lt|gte|lte|eq|neq|and|or|not)\s+"""))
+
+                    val (selectionType, kotlinType) = when {
+                        isAggregate -> SelectionType.AGGREGATE to "Number"
+                        isExpression -> SelectionType.COMPUTED to "Any"  // Expressions can return various types
+                        else -> SelectionType.AGGREGATE to "Number"  // Default to aggregate for backward compatibility
+                    }
+
                     selections.add(
                         Selection(
                             alias = alias,
-                            type = SelectionType.AGGREGATE,
-                            kotlinType = "Number"  // All aggregates return Number
+                            type = selectionType,
+                            kotlinType = kotlinType
                         )
                     )
                 }
