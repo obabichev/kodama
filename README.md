@@ -21,7 +21,9 @@
 
 ### Installation
 
-Add to your `build.gradle.kts`:
+#### Option 1: From Maven Central (Recommended - Coming Soon)
+
+Once published to Maven Central, simply add to your `build.gradle.kts`:
 
 ```kotlin
 plugins {
@@ -30,6 +32,66 @@ plugins {
 
 dependencies {
     implementation("com.obabichev.kodama:kodama-core:0.2.0")
+
+    // SLF4J logging implementation (choose one)
+    implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")
+    implementation("org.apache.logging.log4j:log4j-core:2.24.3")
+    // Or use Logback instead:
+    // implementation("ch.qos.logback:logback-classic:1.4.14")
+}
+```
+
+**Note:** `kodama-core` automatically includes the PostgreSQL JDBC driver as a transitive dependency.
+
+**Package Configuration (Optional):**
+```kotlin
+kodama {
+    schemaPackage.set("com.yourcompany.yourproject.schema")  // Auto-detected if not specified
+    generatedPackage.set("com.yourcompany.yourproject.generated")  // Defaults to {schema}.generated
+}
+```
+
+#### Option 2: From Maven Local (For Testing)
+
+To test Kodama before the Maven Central release, you can publish it locally:
+
+1. Clone and build Kodama:
+```bash
+git clone https://github.com/obabichev/kodama.git
+cd kodama
+./gradlew publishAllToMavenLocal
+```
+
+2. In your project's `settings.gradle.kts`, add `mavenLocal()`:
+```kotlin
+pluginManagement {
+    repositories {
+        mavenLocal()  // Add this
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        mavenLocal()  // Add this
+        mavenCentral()
+    }
+}
+```
+
+3. Use Kodama in your `build.gradle.kts`:
+```kotlin
+plugins {
+    id("com.obabichev.kodama") version "0.2.0"
+}
+
+dependencies {
+    implementation("com.obabichev.kodama:kodama-core:0.2.0")
+
+    // SLF4J logging implementation (required)
+    implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")
+    implementation("org.apache.logging.log4j:log4j-core:2.24.3")
 }
 ```
 
@@ -448,6 +510,12 @@ Kodama is built on these core principles:
 - PostgreSQL 12+
 - JVM 17+
 
+### Dependencies
+
+Kodama requires:
+- **kodama-core** - The main library (includes PostgreSQL JDBC driver and SLF4J API)
+- **SLF4J implementation** - A logging backend like Log4j or Logback (you must add this)
+
 ## Contributing
 
 Contributions are welcome! Please:
@@ -455,6 +523,10 @@ Contributions are welcome! Please:
 1. Check the [roadmap](ROADMAP.md) for planned features
 2. Open an issue to discuss your idea
 3. Submit a PR with tests and documentation
+
+**For Maintainers:**
+- [Version Update Guide](VERSION_UPDATE.md) - How to update versions for releases
+- [Publishing Guide](doc/publishing.md) - How to publish to Maven Central
 
 ## Building from Source
 

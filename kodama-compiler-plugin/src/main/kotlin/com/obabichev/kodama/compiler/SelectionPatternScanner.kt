@@ -7,8 +7,10 @@ package com.obabichev.kodama.compiler
 interface SelectionPatternScanner {
     /**
      * Scan a file and extract selection patterns
+     * @param content The file content to scan
+     * @param tableNameMap Map of lowercase table names to original PascalCase names for case-insensitive lookup
      */
-    fun scanFile(content: String): List<SelectionPattern>
+    fun scanFile(content: String, tableNameMap: Map<String, String>): List<SelectionPattern>
 }
 
 /**

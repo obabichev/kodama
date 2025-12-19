@@ -5,7 +5,7 @@ import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.tests.infrastructure.DatabaseTest
 import com.obabichev.kodama.tests.schema.Person
 import com.obabichev.kodama.tests.schema.Product
-import com.obabichev.kodama.tests.data.*
+import com.obabichev.kodama.tests.schema.generated.*
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue

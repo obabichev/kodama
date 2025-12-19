@@ -5,7 +5,7 @@ import com.obabichev.kodama.components.expression.and
 import com.obabichev.kodama.query.query
 import com.obabichev.kodama.query.eq
 import com.obabichev.kodama.schema.Table
-import com.obabichev.kodama.tests.data.*
+import com.obabichev.kodama.tests.schema.generated.*
 import com.obabichev.kodama.tests.infrastructure.DatabaseTest
 import com.obabichev.kodama.tests.schema.Order
 import com.obabichev.kodama.tests.schema.Person

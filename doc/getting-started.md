@@ -15,7 +15,9 @@ Kodama is a type-safe SQL query builder and ORM for Kotlin that provides compile
 
 ## Installation
 
-Add Kodama to your `build.gradle.kts`:
+### Option 1: From Maven Central (Recommended - Coming Soon)
+
+Once published to Maven Central, simply add Kodama to your `build.gradle.kts`:
 
 ```kotlin
 plugins {
@@ -24,8 +26,100 @@ plugins {
 
 dependencies {
     implementation("com.obabichev.kodama:kodama-core:0.2.0")
+
+    // SLF4J logging implementation (required - choose one)
+    implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")
+    implementation("org.apache.logging.log4j:log4j-core:2.24.3")
+    // Or use Logback instead:
+    // implementation("ch.qos.logback:logback-classic:1.4.14")
 }
 ```
+
+**What's included:**
+- `kodama-core` - The core library with query DSL and entity layer
+- PostgreSQL JDBC driver (included automatically as a transitive dependency)
+- SLF4J API (included automatically as a transitive dependency)
+
+**What you need to add:**
+- An SLF4J implementation (Log4j, Logback, or another) - required for logging
+
+### Option 2: From Maven Local (For Testing)
+
+To test Kodama before the Maven Central release:
+
+#### Step 1: Build and Publish Locally
+
+Clone and publish Kodama to your local Maven repository:
+
+```bash
+git clone https://github.com/obabichev/kodama.git
+cd kodama
+./gradlew publishAllToMavenLocal
+```
+
+This publishes both `kodama-core` and `kodama-compiler-plugin` to `~/.m2/repository/`.
+
+#### Step 2: Configure Your Project
+
+In your project's `settings.gradle.kts`, add `mavenLocal()` to the repositories:
+
+```kotlin
+pluginManagement {
+    repositories {
+        mavenLocal()  // Add this to resolve the Kodama plugin
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        mavenLocal()  // Add this to resolve kodama-core
+        mavenCentral()
+    }
+}
+```
+
+#### Step 3: Use Kodama
+
+Now you can use Kodama in your `build.gradle.kts`:
+
+```kotlin
+plugins {
+    id("com.obabichev.kodama") version "0.2.0"
+}
+
+dependencies {
+    implementation("com.obabichev.kodama:kodama-core:0.2.0")
+
+    // SLF4J logging implementation (required)
+    implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")
+    implementation("org.apache.logging.log4j:log4j-core:2.24.3")
+}
+```
+
+**Note:** When Kodama is published to Maven Central, you can remove `mavenLocal()` from your repositories.
+
+### Package Configuration (Optional)
+
+By default, Kodama automatically detects your package structure. However, you can explicitly configure packages if needed:
+
+```kotlin
+kodama {
+    // Package where your Table definitions are located
+    schemaPackage.set("com.yourcompany.yourproject.schema")
+
+    // Package where generated code will be placed
+    generatedPackage.set("com.yourcompany.yourproject.generated")
+}
+```
+
+**Auto-Detection:** If not configured, Kodama will:
+1. Scan your `src/main/kotlin` directory for files containing `Table` definitions
+2. Extract the package name from those files
+3. Place generated code in `{schemaPackage}.generated`
+
+**Example:** If your tables are in `com.example.myapp.schema`, generated code will be in `com.example.myapp.schema.generated`.
 
 ## Basic Concepts
 
@@ -79,6 +173,42 @@ withConnection { transaction ->
     results.forEach { row ->
         println("Name: ${row.person.name}, Age: ${row.person.age}")
     }
+}
+```
+
+## Complete Setup Example
+
+Here's a complete `build.gradle.kts` with all required dependencies:
+
+```kotlin
+plugins {
+    kotlin("jvm") version "2.2.0"
+    id("com.obabichev.kodama") version "0.2.0"
+}
+
+repositories {
+    mavenCentral()
+}
+
+kotlin {
+    jvmToolchain(17)
+    compilerOptions {
+        freeCompilerArgs.add("-Xcontext-parameters")  // Required for Entity Layer
+    }
+}
+
+dependencies {
+    // Kodama
+    implementation("com.obabichev.kodama:kodama-core:0.2.0")
+
+    // Logging (required - choose one)
+    implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")
+    implementation("org.apache.logging.log4j:log4j-core:2.24.3")
+    // Or Logback:
+    // implementation("ch.qos.logback:logback-classic:1.4.14")
+
+    // PostgreSQL driver (already included transitively, but shown for clarity)
+    // implementation("org.postgresql:postgresql:42.7.8")
 }
 ```
 

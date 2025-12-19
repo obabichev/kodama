@@ -4,9 +4,17 @@ Welcome to the Kodama documentation! Kodama is a type-safe SQL query builder and
 
 ## Documentation
 
+### For Users
+
 - **[Getting Started](getting-started.md)** - Installation, basic concepts, and query building
+- **[Package Configuration](package-configuration.md)** - Configure packages for your project structure
 - **[Entity Layer (ORM)](entities.md)** - CRUD operations, relationships, and entity management
 - **[Code Generation](code-generation.md)** - How Kodama generates type-safe code
+
+### For Contributors
+
+- **[Version Update Guide](../VERSION_UPDATE.md)** - How to update the version for new releases
+- **[Publishing Guide](publishing.md)** - How to publish Kodama to Maven Central
 - **[Roadmap](../ROADMAP.md)** - Planned features and development roadmap
 
 ## Quick Start
@@ -22,6 +30,10 @@ plugins {
 
 dependencies {
     implementation("com.obabichev.kodama:kodama-core:0.2.0")
+
+    // SLF4J logging implementation (required)
+    implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")
+    implementation("org.apache.logging.log4j:log4j-core:2.24.3")
 }
 ```
 

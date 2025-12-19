@@ -354,6 +354,28 @@ Tests use PostgreSQL with test data:
 4. Update documentation if needed
 5. Commit changes
 
+## Important Changes
+
+### Package Auto-Detection (v0.2.1+)
+
+Kodama now automatically detects your package structure! The compiler plugin:
+- Scans source files for `Table` definitions
+- Extracts the package name
+- Generates code to `{detectedPackage}.generated`
+
+**No configuration needed for most projects!** But you can override if needed:
+
+```kotlin
+kodama {
+    schemaPackage.set("com.yourcompany.yourproject.schema")
+    generatedPackage.set("com.yourcompany.yourproject.generated")
+}
+```
+
+### Breaking Change from Earlier Versions
+
+Generated code is now placed in `{schemaPackage}.generated` instead of hardcoded `com.obabichev.kodama.tests.data`. This allows Kodama to work in external projects with any package structure.
+
 ## Current State
 
 - Version: 0.1.0 (Alpha)
