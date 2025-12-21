@@ -4,14 +4,26 @@ import com.obabichev.kodama.components.Column
 import com.obabichev.kodama.components.ColumnType
 import com.obabichev.kodama.components.Relation
 import com.obabichev.kodama.components.types.BooleanColumnType
+import com.obabichev.kodama.components.types.DateColumnType
 import com.obabichev.kodama.components.types.DecimalColumnType
 import com.obabichev.kodama.components.types.DoubleColumnType
 import com.obabichev.kodama.components.types.FloatColumnType
 import com.obabichev.kodama.components.types.IntColumnType
+import com.obabichev.kodama.components.types.IntervalColumnType
 import com.obabichev.kodama.components.types.LongColumnType
 import com.obabichev.kodama.components.types.ShortColumnType
 import com.obabichev.kodama.components.types.StringColumnType
+import com.obabichev.kodama.components.types.TimeColumnType
+import com.obabichev.kodama.components.types.TimeWithTimeZoneColumnType
+import com.obabichev.kodama.components.types.TimestampColumnType
+import com.obabichev.kodama.components.types.TimestampWithTimeZoneColumnType
 import java.math.BigDecimal
+import java.time.Duration
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.OffsetDateTime
+import java.time.OffsetTime
 
 /**
  * Base class for table definitions.
@@ -25,15 +37,10 @@ import java.math.BigDecimal
  * }
  * ```
  *
- * Note: Table properties are accessed through generated contexts in queries:
- * ```
- * query()
- *     .from(Person)
- *     .select { person.name }  // Access via context, not Person.name
- *     .where { person.age eq 25 }
- * ```
+ * Tables implement TableSource, allowing them to be used uniformly with subqueries
+ * in FROM and JOIN clauses.
  */
-abstract class Table(tableName: String) {
+abstract class Table(tableName: String) : TableSource {
     val relation: Relation = Relation(tableName)
 
     init {
@@ -45,6 +52,12 @@ abstract class Table(tableName: String) {
      * Returns the fully qualified table name (used for generated code)
      */
     val tableName: String = tableName
+
+    /**
+     * The alias used for this table in SQL queries.
+     * Defaults to lowercase table name.
+     */
+    override val alias: String get() = tableName.lowercase()
 
     /**
      * Define an integer column (non-nullable by default)
@@ -133,9 +146,121 @@ abstract class Table(tableName: String) {
     }
 
     /**
-     * Get all columns from this table
+     * Define a date column (non-nullable by default)
+     * Maps to Kotlin/Java LocalDate
+     *
+     * Example:
+     * ```kotlin
+     * val birthDate = date("birth_date")
+     * val startDate = date("start_date").nullable()
+     * ```
      */
-    fun allColumns(): List<Column<*>> = relation.columns
+    protected fun date(columnName: String): Column<LocalDate> {
+        val column = Column(columnName, relation, DateColumnType, nullable = false)
+        relation.registerColumn(column)
+        return column
+    }
+
+    /**
+     * Define a time column (non-nullable by default)
+     * Maps to Kotlin/Java LocalTime (time without time zone)
+     *
+     * Example:
+     * ```kotlin
+     * val openingTime = time("opening_time")
+     * val closingTime = time("closing_time")
+     * ```
+     */
+    protected fun time(columnName: String): Column<LocalTime> {
+        val column = Column(columnName, relation, TimeColumnType, nullable = false)
+        relation.registerColumn(column)
+        return column
+    }
+
+    /**
+     * Define a timestamp column (non-nullable by default)
+     * Maps to Kotlin/Java LocalDateTime (timestamp without time zone)
+     *
+     * Example:
+     * ```kotlin
+     * val createdAt = timestamp("created_at")
+     * val updatedAt = timestamp("updated_at").nullable()
+     * ```
+     */
+    protected fun timestamp(columnName: String): Column<LocalDateTime> {
+        val column = Column(columnName, relation, TimestampColumnType, nullable = false)
+        relation.registerColumn(column)
+        return column
+    }
+
+    /**
+     * Define a timestamp with time zone column (non-nullable by default)
+     * Maps to Kotlin/Java OffsetDateTime
+     *
+     * Example:
+     * ```kotlin
+     * val eventTime = timestampWithTimeZone("event_time")
+     * val lastLoginAt = timestampWithTimeZone("last_login_at").nullable()
+     * ```
+     */
+    protected fun timestampWithTimeZone(columnName: String): Column<OffsetDateTime> {
+        val column = Column(columnName, relation, TimestampWithTimeZoneColumnType, nullable = false)
+        relation.registerColumn(column)
+        return column
+    }
+
+    /**
+     * Alias for timestampWithTimeZone() for convenience
+     */
+    protected fun timestamptz(columnName: String): Column<OffsetDateTime> {
+        return timestampWithTimeZone(columnName)
+    }
+
+    /**
+     * Define a time with time zone column (non-nullable by default)
+     * Maps to Kotlin/Java OffsetTime
+     *
+     * Example:
+     * ```kotlin
+     * val scheduledTime = timeWithTimeZone("scheduled_time")
+     * ```
+     */
+    protected fun timeWithTimeZone(columnName: String): Column<OffsetTime> {
+        val column = Column(columnName, relation, TimeWithTimeZoneColumnType, nullable = false)
+        relation.registerColumn(column)
+        return column
+    }
+
+    /**
+     * Alias for timeWithTimeZone() for convenience
+     */
+    protected fun timetz(columnName: String): Column<OffsetTime> {
+        return timeWithTimeZone(columnName)
+    }
+
+    /**
+     * Define an interval column (non-nullable by default)
+     * Maps to Kotlin/Java Duration
+     *
+     * Note: Works best for intervals in terms of days, hours, minutes, seconds.
+     * PostgreSQL intervals with year/month components may not round-trip perfectly.
+     *
+     * Example:
+     * ```kotlin
+     * val duration = interval("duration")
+     * val estimatedTime = interval("estimated_time").nullable()
+     * ```
+     */
+    protected fun interval(columnName: String): Column<Duration> {
+        val column = Column(columnName, relation, IntervalColumnType, nullable = false)
+        relation.registerColumn(column)
+        return column
+    }
+
+    /**
+     * Get all columns from this table (implements TableSource)
+     */
+    override fun allColumns(): List<Column<*>> = relation.columns
 }
 
 /**

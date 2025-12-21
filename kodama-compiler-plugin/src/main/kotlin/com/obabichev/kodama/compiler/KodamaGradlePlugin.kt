@@ -44,8 +44,13 @@ class KodamaGradlePlugin : Plugin<Project> {
         project.afterEvaluate {
             val kotlinExtension = project.extensions.findByType(KotlinProjectExtension::class.java)
             kotlinExtension?.let { kotlin ->
-                // Add generated sources to TEST source set (not main), so test classes are available
+                // Add generated sources to BOTH main and test source sets
                 val generatedDir = File(project.layout.buildDirectory.asFile.get(), "generated/kodama")
+
+                // Add to main source set so generated code is available in production code
+                kotlin.sourceSets.findByName("main")?.kotlin?.srcDir(generatedDir)
+
+                // Add to test source set so generated code is available in tests
                 kotlin.sourceSets.findByName("test")?.kotlin?.srcDir(generatedDir)
 
                 // Make BOTH main and test compilation depend on code generation

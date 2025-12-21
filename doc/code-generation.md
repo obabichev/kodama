@@ -19,8 +19,7 @@ object Person : Table("person") {
 ### 2. You Write Queries
 
 ```kotlin
-query()
-    .from(Person)
+from(Person)
     .join(Order) { order.userName eq person.name }
     .selectAll(Person)
 ```
@@ -79,8 +78,7 @@ Kodama generates several types of code based on your schema and queries:
 When you write this query:
 
 ```kotlin
-query()
-    .from(Person)
+from(Person)
     .join(Order) { order.userName eq person.name }
     .selectAll(Person)
 ```
@@ -171,52 +169,90 @@ fun Order.insert(
 - Returns `InsertResult` with `rowsAffected` and `generatedKeys`
 - Parameter names match column names exactly
 
-### 3. Aggregate Methods
+### 3. Aggregate Methods with Marker Interfaces
 
-When you use aggregate functions with named selections:
+Kodama uses a marker interface pattern for type-safe aggregate selections:
 
 **Your Query:**
 ```kotlin
-query()
-    .from(Order)
-    .select_totalRevenue { sum(order.cost) }
-    .select_orderCount { count(order.id) }
+from(Order)
+    .selectAliased(TotalRevenue) { sum(order.cost) }
+    .selectAliased(OrderCount) { count(order.id) }
 ```
 
-**Generated Methods:**
-```kotlin
-// Method for first aggregate
-fun <OrderSel> AfterFromQueryBuilder_Order<OrderSel, NoSelections>.select_totalRevenue(
-    block: SelectContext_Order.() -> AggregateFunction<*>
-): AfterFromQueryBuilder_Order<OrderSel, SelectionSet_totalRevenue>
+**How Markers Work:**
+1. Generator scans test files for `.selectAliased(MarkerName)` patterns
+2. Extracts marker names and tracks which tables they're used with
+3. Generates marker interfaces automatically
+4. Only generates `selectAliased()` methods for table+marker combinations that are actually used
 
-// Method for second aggregate
-fun <OrderSel> AfterFromQueryBuilder_Order<OrderSel, SelectionSet_totalRevenue>.select_orderCount(
-    block: SelectContext_Order.() -> AggregateFunction<*>
-): AfterFromQueryBuilder_Order<OrderSel, SelectionSet_totalRevenue_orderCount>
+**Generated Marker Interfaces:**
+```kotlin
+// Marker for TotalRevenue - infers Number type from sum()
+interface TotalRevenue<out T> {
+    companion object : TotalRevenue<Number>
+}
+
+// Marker for OrderCount - infers Long type from count()
+interface OrderCount<out T> {
+    companion object : OrderCount<Long>
+}
 ```
 
-**Generated Result Class:**
+**Generated selectAliased() Methods:**
 ```kotlin
-class SelectionResult_totalRevenue_orderCount(
+// Only generated for Order+TotalRevenue since that's what tests use
+fun <OrderSel> AfterFromQueryBuilder_Order<OrderSel>.selectAliased(
+    marker: TotalRevenue<Number>,
+    block: SelectContext_Order.() -> AggregateFunction<*>
+): SelectionResult_Order_TotalRevenue
+
+// Only generated for Order+OrderCount since that's what tests use
+fun <OrderSel> AfterFromQueryBuilder_Order<OrderSel>.selectAliased(
+    marker: OrderCount<Long>,
+    block: SelectContext_Order.() -> AggregateFunction<*>
+): SelectionResult_OrderCount
+```
+
+**Generated Result Classes:**
+```kotlin
+// Result class for TotalRevenue selection
+class SelectionResult_Order_TotalRevenue(
     override val resultSet: ResultSet,
     override val relations: RelationsContainer,
     override val selectedColumns: List<Column<*>>,
     private val selectables: List<Selectable>
 ) : QueryResult {
-    val totalRevenue: Number
-        get() = selectables[0].getValue(resultSet, selectedColumns.size + 1) as Number
+    val totalRevenue: Number  // Type inferred from sum() aggregate
 
-    val orderCount: Number
-        get() = selectables[1].getValue(resultSet, selectedColumns.size + 2) as Number
+    init {
+        // Validates alias and caches value from result set
+        totalRevenue = selectables[0].getValue(resultSet, selectedColumns.size + 1) as Number
+    }
+}
+
+// Result class for OrderCount selection
+class SelectionResult_OrderCount(
+    override val resultSet: ResultSet,
+    override val relations: RelationsContainer,
+    override val selectedColumns: List<Column<*>>,
+    private val selectables: List<Selectable>
+) : QueryResult {
+    val orderCount: Long  // Type inferred from count() aggregate
+
+    init {
+        // Validates alias and caches value from result set
+        orderCount = selectables[0].getValue(resultSet, selectedColumns.size + 1) as Long
+    }
 }
 ```
 
 **Type Safety:**
-- Method names enforce alias (`select_totalRevenue`)
-- Each selection advances the type state
+- Marker names become result property names (TotalRevenue → totalRevenue)
+- Each aggregate type is inferred: count() → Long, sum() → Number, avg() → Double
 - Only selected aggregates have accessors on result
 - Compile-time error if you access non-selected aggregates
+- Optimized generation: only creates methods for actually-used combinations
 
 ### 4. Entity Layer Code
 
@@ -300,6 +336,99 @@ object UserEntityBinding : EntityBinding<User, Int> {
 - EntityBindings handle database mapping
 - Relationship methods auto-generated
 
+### 5. ORDER BY Methods
+
+Kodama generates chainable `orderBy()` methods for type-safe sorting:
+
+**Your Query:**
+```kotlin
+from(Person)
+    .selectAll(Person)
+    .orderBy { person.age.desc() }
+    .orderBy { person.name.asc() }
+```
+
+**Generated OrderByAccessor:**
+```kotlin
+class PersonOrderByAccessor(private val tableAccessor: TableAccessor) {
+    val name get() = Person.name
+    val age get() = Person.age
+}
+```
+
+**Generated OrderByContext:**
+```kotlin
+class OrderByContext_Person(state: QueryState) : OrderByContext() {
+    val person = PersonOrderByAccessor(state.relations.relation(Person))
+}
+```
+
+**Generated orderBy() Method:**
+```kotlin
+fun <PersonSel, AC : AggCount> AfterFromQueryBuilder_Person<PersonSel, AC>.orderBy(
+    block: OrderByContext_Person.() -> OrderByClause
+): AfterFromQueryBuilder_Person<PersonSel, AC> {
+    val context = OrderByContext_Person(state)
+    val clause = context.block()
+    state._orderBy.add(clause)
+    return this
+}
+```
+
+**Key Features:**
+- Chainable API - each call adds one ORDER BY clause
+- Type-safe column access through generated accessor
+- Returns `OrderByClause` from `.asc()` and `.desc()` extension functions
+- Maintains builder type for further chaining
+
+### 6. GROUP BY Methods
+
+Kodama generates chainable `groupBy()` methods for explicit grouping:
+
+**Your Query:**
+```kotlin
+from(Order)
+    .select { order.userName }
+    .selectAliased(OrderCount) { count(order.id) }
+    .groupBy { order.userName }
+```
+
+**Generated GroupByAccessor:**
+```kotlin
+class OrderGroupByAccessor(private val tableAccessor: TableAccessor) {
+    val id get() = Order.id
+    val userName get() = Order.userName
+    val product get() = Order.product
+    val cost get() = Order.cost
+}
+```
+
+**Generated GroupByContext:**
+```kotlin
+class GroupByContext_Order(state: QueryState) : GroupByContext() {
+    val order = OrderGroupByAccessor(state.relations.relation(Order))
+}
+```
+
+**Generated groupBy() Method:**
+```kotlin
+fun <OrderSel, AC : AggCount> AfterFromQueryBuilder_Order<OrderSel, AC>.groupBy(
+    block: GroupByContext_Order.() -> Column<*>
+): AfterFromQueryBuilder_Order<OrderSel, AC> {
+    val context = GroupByContext_Order(state)
+    val column = context.block()
+    state._groupBy.add(column)
+    return this
+}
+```
+
+**Key Features:**
+- Chainable API - each call adds one GROUP BY column
+- Type-safe column access through generated accessor
+- Returns `Column<*>` directly
+- Required when mixing regular columns with aggregates
+- Not needed for aggregates-only queries
+
 ## How Scanning Works
 
 ### Table Discovery
@@ -316,9 +445,27 @@ val tablePattern = """object\s+(\w+)\s*:\s*Table\s*\([^)]*\)\s*\{([^}]*)\}""".to
 Generator scans test files for query chains:
 
 ```kotlin
-// Finds: query().from(Person).join(Order)...
-val queryChainPattern = """query\s*\(\s*\)\s*\.from\s*\([^)]+\)(?:\s*\.join\s*\([^)]+\)(?:\s*\{[^}]*\})?)*""".toRegex()
+// Finds: from(Person).join(Order)...
+val queryChainPattern = """from\s*\([^)]+\)(?:\s*\.join\s*\([^)]+\)(?:\s*\{[^}]*\})?)*""".toRegex()
 ```
+
+### Marker Discovery
+
+Generator scans test files for aggregate marker usage:
+
+```kotlin
+// Finds: .selectAliased(MarkerName) { ... }
+val markerPattern = """\.selectAliased\s*\(\s*([A-Z]\w+)\s*\)""".toRegex()
+
+// Also scans inside subquery blocks
+val subqueryPattern = """(?:fromAliased|joinAliased|leftJoinAliased)\s*\([A-Z]\w+\)\s*\{...\}""".toRegex()
+```
+
+**Marker Tracking:**
+- Tracks which markers are used with which table combinations
+- Only generates `selectAliased()` methods for actually-used combinations
+- Example: If TotalRevenue is only used with Order table, only generates `AfterFromQueryBuilder_Order.selectAliased(TotalRevenue)`
+- Optimizes generated code size by avoiding unnecessary methods
 
 ### Combination Generation
 
@@ -442,13 +589,12 @@ cat build/generated/kodama/com/obabichev/kodama/tests/data/QueryExtensions.kt
 
 ```kotlin
 // ✅ Will be detected
-val queryBuilder = query()
-    .from(Person)
+val queryBuilder = from(Person)
     .selectAll(Person)
 
 // ❌ Won't be detected (split across variables)
-val q = query()
-val fromBuilder = q.from(Person)
+val fromBuilder = from(Person)
+val selectBuilder = fromBuilder.selectAll(Person)
 ```
 
 ### "Generated code doesn't compile"
@@ -479,11 +625,11 @@ src/main/kotlin/     ✗ Not scanned for queries
 
 ```kotlin
 // ✅ Good
-query().from(Person).join(Order) { ... }
+from(Person).join(Order) { ... }
 
 // ❌ Avoid splitting
-val q = query()
-val builder = q.from(Person)
+val fromBuilder = from(Person)
+val builder = fromBuilder.join(Order) { ... }
 ```
 
 ### 3. Regenerate After Schema Changes
@@ -501,7 +647,8 @@ kodama-compiler-plugin/src/main/kotlin/com/obabichev/kodama/compiler/KodamaTable
 
 Key steps:
 1. Scan schema files for table definitions
-2. Scan test files for query patterns
-3. Extract table combinations
-4. Generate type-safe extension functions
-5. Output to `build/generated/kodama/`
+2. Scan test files for query patterns and marker usage
+3. Extract table combinations and marker-table associations
+4. Generate type-safe extension functions (from, join, select, selectAliased, orderBy, groupBy)
+5. Generate marker interfaces and result classes
+6. Output to `build/generated/kodama/`

@@ -16,7 +16,7 @@ class AggregateScanner : SelectionPatternScanner {
 
             // Extract table combination
             val tables = mutableListOf<String>()
-            val tableRefPattern = """(?:from|join)\s*\(\s*(\w+)""".toRegex()
+            val tableRefPattern = """(?:from|fromAliased|join|joinAliased|leftJoin|leftJoinAliased)\s*\(\s*(\w+)""".toRegex()
             tableRefPattern.findAll(queryChain).forEach { match ->
                 val tableRef = match.groupValues[1]
                 val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef  // Use original case

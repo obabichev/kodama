@@ -144,6 +144,18 @@ object Order : Table("order") {
     val cost = integer("cost")
     val notes = varchar("notes", 1000).nullable()  // Optional notes - Column<String?>
 }
+
+// Datetime column types
+object Event : Table("event") {
+    val id = integer("id").primaryKey()
+    val eventDate = date("event_date")                    // DATE → LocalDate
+    val eventTime = time("event_time")                    // TIME → LocalTime
+    val createdAt = timestamp("created_at")               // TIMESTAMP → LocalDateTime
+    val scheduledFor = timestamp("scheduled_for").nullable()  // Optional timestamp
+    val eventTimestamp = timestampWithTimeZone("event_timestamp")  // TIMESTAMPTZ → OffsetDateTime
+    val reminderTime = timeWithTimeZone("reminder_time")  // TIMETZ → OffsetTime
+    val duration = interval("duration")                   // INTERVAL → Duration
+}
 ```
 
 ### 2. Build Queries
@@ -151,11 +163,10 @@ object Order : Table("order") {
 Use the fluent DSL to build type-safe queries:
 
 ```kotlin
-import com.obabichev.kodama.query.query
+import com.obabichev.kodama.query.from
 import com.obabichev.kodama.query.eq
 
-val queryBuilder = query()
-    .from(Person)
+val queryBuilder = from(Person)
     .selectAll(Person)  // Select all columns from Person table
     .where {
         person.age eq 25
@@ -225,8 +236,7 @@ object User : Table("users") {
 }
 
 // 2. Build a query
-val queryBuilder = query()
-    .from(User)
+val queryBuilder = from(User)
     .selectAll(User)
     .where {
         user.age eq 25
@@ -269,9 +279,8 @@ Nullable columns have nullable types in results:
 
 ```kotlin
 withConnection { transaction ->
-    val results = query()
-        .from(Product)
-        .select(Product.all())
+    val results = from(Product)
+        .selectAll(Product)
         .execute(transaction)
 
     results.forEach { row ->
@@ -303,6 +312,110 @@ val nullable: Column<Int?> = Product.discount
 // ❌ Won't compile
 val wrong1: Column<Int?> = Product.id  // Type mismatch
 val wrong2: Column<Int> = Product.discount  // Type mismatch
+```
+
+## Date/Time Column Types
+
+Kodama provides full support for PostgreSQL date and time types, mapping them to Java Time API types for type safety and timezone awareness.
+
+### Available Date/Time Types
+
+| SQL Type | Kodama Function | Kotlin Type | Description |
+|----------|----------------|-------------|-------------|
+| DATE | `date("column")` | `LocalDate` | Calendar date (year, month, day) |
+| TIME | `time("column")` | `LocalTime` | Time of day without timezone |
+| TIMESTAMP | `timestamp("column")` | `LocalDateTime` | Date + time without timezone |
+| TIMESTAMPTZ | `timestampWithTimeZone("column")` | `OffsetDateTime` | Date + time with timezone |
+| TIMETZ | `timeWithTimeZone("column")` | `OffsetTime` | Time of day with timezone |
+| INTERVAL | `interval("column")` | `Duration` | Time duration/period |
+
+### Example Table Definition
+
+```kotlin
+import java.time.*
+
+object Event : Table("events") {
+    val id = integer("id").primaryKey()
+    val eventDate = date("event_date")                    // LocalDate
+    val eventTime = time("event_time")                    // LocalTime
+    val createdAt = timestamp("created_at")               // LocalDateTime
+    val scheduledFor = timestamp("scheduled_for").nullable()  // LocalDateTime?
+    val eventTimestamp = timestampWithTimeZone("event_timestamp")  // OffsetDateTime
+    val reminderTime = timeWithTimeZone("reminder_time")  // OffsetTime
+    val duration = interval("duration")                   // Duration
+}
+```
+
+### Working with Date/Time Values
+
+All datetime types integrate seamlessly with queries and inserts:
+
+```kotlin
+withConnection { transaction ->
+    // Insert event with datetime values
+    Event.insert(
+        transaction = transaction,
+        id = 1,
+        eventDate = LocalDate.of(2025, 12, 25),
+        eventTime = LocalTime.of(14, 30),
+        createdAt = LocalDateTime.now(),
+        scheduledFor = null,  // nullable
+        eventTimestamp = OffsetDateTime.now(),
+        reminderTime = OffsetTime.of(LocalTime.of(13, 0), ZoneOffset.UTC),
+        duration = Duration.ofHours(2)
+    )
+
+    // Query events
+    val results = from(Event)
+        .selectAll(Event)
+        .execute(transaction)
+
+    results.forEach { row ->
+        val date: LocalDate = row.event.eventDate
+        val time: LocalTime = row.event.eventTime
+        val timestamp: OffsetDateTime = row.event.eventTimestamp
+
+        println("Event on $date at $time")
+        println("Created: ${row.event.createdAt}")
+        println("Duration: ${row.event.duration.toHours()} hours")
+    }
+}
+```
+
+### Timezone Handling
+
+PostgreSQL stores timezone-aware types (TIMESTAMPTZ) in UTC internally and converts them based on the session timezone:
+
+- **TIMESTAMPTZ (OffsetDateTime)**: Preserves the offset information. PostgreSQL stores in UTC.
+- **TIMETZ (OffsetTime)**: Time with timezone offset.
+- **TIMESTAMP (LocalDateTime)**: No timezone information - assumes local or session timezone.
+- **DATE/TIME (LocalDate/LocalTime)**: No timezone information.
+
+**Best Practice**: Use `TIMESTAMPTZ` for events that need timezone accuracy (user actions, scheduled tasks), and `TIMESTAMP` for timezone-independent times (relative durations, local schedules).
+
+### Interval Type
+
+PostgreSQL `INTERVAL` type maps to `java.time.Duration`:
+
+```kotlin
+// Create durations
+val twoHours = Duration.ofHours(2)
+val thirtyMinutes = Duration.ofMinutes(30)
+val oneDay = Duration.ofDays(1)
+
+// Insert with duration
+Event.insert(
+    transaction = transaction,
+    id = 1,
+    duration = Duration.ofHours(3).plusMinutes(30),  // 3 hours 30 minutes
+    // ... other fields
+)
+
+// Query and use durations
+results.forEach { row ->
+    val duration: Duration = row.event.duration
+    println("Duration: ${duration.toHours()}h ${duration.toMinutesPart()}m")
+}
 ```
 
 ## Advanced Features
@@ -346,25 +459,24 @@ Order.insert(
 Kodama supports type-safe aggregate functions with named accessors:
 
 ```kotlin
-// Simple aggregate query
-val results = query()
-    .from(Order)
-    .select_totalRevenue { sum(order.cost) }
-    .select_orderCount { count(order.id) }
+// Aggregates only - no GROUP BY needed
+val results = from(Order)
+    .selectAliased(TotalRevenue) { sum(order.cost) }
+    .selectAliased(OrderCount) { count(order.id) }
     .execute(transaction)
 
-// Access with compile-time safe named accessors
+// Access with type-safe named accessors
 results.forEach { row ->
-    val revenue: Number = row.totalRevenue
-    val count: Number = row.orderCount
+    val revenue: Number = row.totalRevenue  // sum() returns Number
+    val count: Long = row.orderCount        // count() returns Long
     println("Total: $revenue from $count orders")
 }
 
-// Mix columns with aggregates (GROUP BY is automatic)
-val byUser = query()
-    .from(Order)
+// Mix columns with aggregates - GROUP BY required
+val byUser = from(Order)
     .select { order.userName }  // Regular column selection
-    .select_userTotal { sum(order.cost) }  // Named aggregate
+    .selectAliased(UserTotal) { sum(order.cost) }  // Named aggregate
+    .groupBy { order.userName }  // Must group by non-aggregate columns
     .execute(transaction)
 
 byUser.forEach { row ->
@@ -379,20 +491,271 @@ byUser.forEach { row ->
 - `min(column)` - Minimum value
 - `max(column)` - Maximum value
 
+**Type Inference:**
+
+Kodama infers appropriate types for each aggregate function:
+- `count()` → `Long` - Count of rows
+- `sum()` → `Number` - Sum of numeric columns (returns Number for flexibility)
+- `avg()` → `Double` - Average value
+- `min()`/`max()` → Preserves source column type
+
 ### ORDER BY
 
 Sort query results with type-safe column references:
 
 ```kotlin
-query()
-    .from(User)
+// Single column ORDER BY
+from(User)
     .selectAll(User)
-    .orderBy {
-        +user.age.desc()  // Descending
-        +user.name.asc()  // Ascending
+    .orderBy { user.age.desc() }
+    .execute(transaction)
+
+// Multiple columns - chain orderBy calls
+from(User)
+    .selectAll(User)
+    .orderBy { user.age.desc() }  // First: descending age
+    .orderBy { user.name.asc() }  // Then: ascending name
+    .execute(transaction)
+```
+
+**Important:**
+- Each `.orderBy { }` call returns exactly one `OrderByClause` and can be chained
+- Columns are sorted in the order orderBy calls are chained
+
+### GROUP BY
+
+When mixing regular columns with aggregate functions, use explicit GROUP BY:
+
+```kotlin
+// Single column GROUP BY
+from(Order)
+    .select { order.userName }
+    .selectAliased(TotalCost) { sum(order.cost) }
+    .groupBy { order.userName }  // Returns one column
+    .execute(transaction)
+
+// Multiple columns - chain groupBy calls
+from(Order)
+    .select { order.userName }
+    .select { order.product }
+    .selectAliased(TotalCost) { sum(order.cost) }
+    .groupBy { order.userName }   // First grouping column
+    .groupBy { order.product }    // Second grouping column
+    .execute(transaction)
+```
+
+**Important:**
+- GROUP BY is **required** when mixing columns with aggregates
+- All non-aggregate selected columns must be included in GROUP BY
+- Each `.groupBy { }` call returns exactly one column and can be chained
+- Type-safe: only columns from the query can be referenced
+
+### LIMIT and OFFSET (Pagination)
+
+Paginate query results with type-safe limit and offset:
+
+```kotlin
+// Basic pagination
+from(User)
+    .selectAll(User)
+    .orderBy { user.id.asc() }
+    .limit(10)
+    .offset(20)
+    .execute(transaction)
+
+// Typical pagination pattern
+val page = 2
+val pageSize = 10
+from(User)
+    .selectAll(User)
+    .orderBy { user.id.asc() }
+    .limit(pageSize)
+    .offset(page * pageSize)
+    .execute(transaction)
+```
+
+**Key features:**
+- Works with WHERE, ORDER BY, JOIN, aggregates
+- Optional parameters (nullable)
+- Type-safe method chaining
+
+### Comparison Operators
+
+Kodama provides a complete set of comparison operators for building WHERE clauses:
+
+#### Basic Comparison Operators
+
+```kotlin
+// Equality
+from(User)
+    .selectAll(User)
+    .where { user.age eq 25 }  // age = 25
+
+// Not equal
+from(User)
+    .selectAll(User)
+    .where { user.age neq 0 }  // age <> 0
+
+// Greater than / Less than
+from(User)
+    .selectAll(User)
+    .where { user.age gt 18 }  // age > 18
+
+from(User)
+    .selectAll(User)
+    .where { user.age lt 65 }  // age < 65
+
+// Greater than or equal / Less than or equal
+from(User)
+    .selectAll(User)
+    .where { user.age gte 18 }  // age >= 18
+
+from(User)
+    .selectAll(User)
+    .where { user.age lte 65 }  // age <= 65
+```
+
+#### Range Queries (BETWEEN)
+
+The `between` operator provides inclusive range queries:
+
+```kotlin
+// Find users aged 18 to 65 (inclusive)
+from(User)
+    .selectAll(User)
+    .where { user.age.between(18, 65) }
+    .execute(transaction)
+
+// BETWEEN includes both boundaries
+// Generates: WHERE age BETWEEN 18 AND 65
+```
+
+#### NULL Checks
+
+Check for NULL and non-NULL values:
+
+```kotlin
+// Find users with no email
+from(User)
+    .selectAll(User)
+    .where { user.email.isNull() }
+    .execute(transaction)
+
+// Find users with email
+from(User)
+    .selectAll(User)
+    .where { user.email.isNotNull() }
+    .execute(transaction)
+
+// Combine NULL checks
+from(Product)
+    .selectAll(Product)
+    .where {
+        product.description.isNotNull() and product.discount.isNull()
     }
     .execute(transaction)
 ```
+
+#### String Pattern Matching
+
+Pattern matching with LIKE, ILIKE, and convenience methods:
+
+```kotlin
+// Case-sensitive pattern matching
+from(User)
+    .selectAll(User)
+    .where { user.name like "%john%" }
+    .execute(transaction)
+
+// Case-insensitive pattern matching (PostgreSQL-specific)
+from(User)
+    .selectAll(User)
+    .where { user.name ilike "%JOHN%" }  // Matches "john", "John", "JOHN"
+    .execute(transaction)
+
+// Convenience methods for common patterns
+from(User)
+    .selectAll(User)
+    .where { user.name startsWith "John" }  // name LIKE 'John%'
+    .execute(transaction)
+
+from(User)
+    .selectAll(User)
+    .where { user.name endsWith "Smith" }  // name LIKE '%Smith'
+    .execute(transaction)
+
+from(User)
+    .selectAll(User)
+    .where { user.name contains "doe" }  // name LIKE '%doe%'
+    .execute(transaction)
+
+// Combine string operators with boolean logic
+from(Product)
+    .selectAll(Product)
+    .where {
+        (product.name startsWith "Premium") and (product.name endsWith "Pro")
+    }
+    .execute(transaction)
+```
+
+**Available Operators:**
+- **Comparison**: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`
+- **Range**: `between(lower, upper)` - inclusive on both ends
+- **NULL checks**: `isNull()`, `isNotNull()`
+- **String matching**: `like`, `ilike` (case-insensitive), `startsWith`, `endsWith`, `contains`
+- **List membership**: `inList(values)`, `notInList(values)`
+- **Boolean logic**: `and`, `or`, `not` (for combining conditions)
+
+#### List Membership (IN Operators)
+
+Check if a column value is in or not in a list of values:
+
+```kotlin
+// IN - find users with specific names
+from(User)
+    .selectAll(User)
+    .where { user.name.inList(listOf("alice", "bob", "charlie")) }
+    .execute(transaction)
+
+// NOT IN - exclude specific names
+from(User)
+    .selectAll(User)
+    .where { user.name.notInList(listOf("banned1", "banned2")) }
+    .execute(transaction)
+
+// Works with integers and other types
+from(User)
+    .selectAll(User)
+    .where { user.age.inList(listOf(25, 30, 35, 40)) }
+    .execute(transaction)
+
+// Empty list handling
+from(User)
+    .selectAll(User)
+    .where { user.name.inList(emptyList()) }  // Generates FALSE - no matches
+    .execute(transaction)
+
+from(User)
+    .selectAll(User)
+    .where { user.name.notInList(emptyList()) }  // Generates TRUE - all rows match
+    .execute(transaction)
+
+// Combine with other conditions
+from(User)
+    .selectAll(User)
+    .where {
+        user.name.inList(listOf("alice", "bob", "charlie")) and (user.age gt 25)
+    }
+    .execute(transaction)
+```
+
+**Key features:**
+- `inList(values)` - Returns TRUE if column value is in the list
+- `notInList(values)` - Returns TRUE if column value is NOT in the list
+- Works with all column types (strings, integers, etc.)
+- Empty list handling: `inList(emptyList())` = FALSE (no matches), `notInList(emptyList())` = TRUE (all match)
+- Type-safe parameter binding prevents SQL injection
+- Can be combined with other operators using `and`/`or`
 
 ### Entity Layer
 

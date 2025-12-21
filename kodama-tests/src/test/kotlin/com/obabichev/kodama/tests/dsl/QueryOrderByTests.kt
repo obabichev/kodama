@@ -1,7 +1,6 @@
 package com.obabichev.kodama.tests.dsl
 
-import com.obabichev.kodama.query.query
-import com.obabichev.kodama.query.eq
+import com.obabichev.kodama.query.*
 import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.tests.schema.generated.*
 import com.obabichev.kodama.tests.infrastructure.DatabaseTest
@@ -22,12 +21,9 @@ class QueryOrderByTests : DatabaseTest() {
             person("pipiru", age = 2)
         }
 
-        val queryBuilder = query()
-            .from(Person)
+        val queryBuilder = from(Person)
             .selectAll(Person)
-            .orderBy {
-                +person.age.asc()
-            }
+            .orderBy { person.age.asc() }
 
         println("Test ORDER BY ASC SQL: ${queryBuilder.build().sql()}")
 
@@ -54,12 +50,9 @@ class QueryOrderByTests : DatabaseTest() {
             person("pipiru", age = 2)
         }
 
-        val queryBuilder = query()
-            .from(Person)
+        val queryBuilder = from(Person)
             .selectAll(Person)
-            .orderBy {
-                +person.age.desc()
-            }
+            .orderBy { person.age.desc() }
 
         println("Test ORDER BY DESC SQL: ${queryBuilder.build().sql()}")
 
@@ -85,13 +78,10 @@ class QueryOrderByTests : DatabaseTest() {
             person("pipiru", age = 2)
         }
 
-        val queryBuilder = query()
-            .from(Person)
+        val queryBuilder = from(Person)
             .selectAll(Person)
-            .orderBy {
-                +person.age.desc()
-                +person.name.asc()
-            }
+            .orderBy { person.age.desc() }
+            .orderBy { person.name.asc() }
 
         println("Test ORDER BY Multiple Columns SQL: ${queryBuilder.build().sql()}")
 
@@ -119,15 +109,12 @@ class QueryOrderByTests : DatabaseTest() {
             person("pipiru", age = 2)
         }
 
-        val queryBuilder = query()
-            .from(Person)
+        val queryBuilder = from(Person)
             .selectAll(Person)
             .where {
                 person.age eq 2
             }
-            .orderBy {
-                +person.name.asc()
-            }
+            .orderBy { person.name.asc() }
 
         println("Test ORDER BY with WHERE SQL: ${queryBuilder.build().sql()}")
 
@@ -150,16 +137,13 @@ class QueryOrderByTests : DatabaseTest() {
             order(3, "kokoro", "Keyboard", 100)
         }
 
-        val queryBuilder = query()
-            .from(Person)
+        val queryBuilder = from(Person)
             .join(Order) {
                 order.userName eq person.name
             }
             .selectAll(Person)
             .selectAll(Order)
-            .orderBy {
-                +order.cost.desc()
-            }
+            .orderBy { order.cost.desc() }
 
         println("Test ORDER BY with JOIN SQL: ${queryBuilder.build().sql()}")
 
@@ -189,17 +173,14 @@ class QueryOrderByTests : DatabaseTest() {
             order(3, "kokoro", "Keyboard", 100)
         }
 
-        val queryBuilder = query()
-            .from(Person)
+        val queryBuilder = from(Person)
             .join(Order) {
                 order.userName eq person.name
             }
             .selectAll(Person)
             .selectAll(Order)
-            .orderBy {
-                +person.name.asc()
-                +order.cost.asc()
-            }
+            .orderBy { person.name.asc() }
+            .orderBy { order.cost.asc() }
 
         println("Test ORDER BY Multiple Columns with JOIN SQL: ${queryBuilder.build().sql()}")
 

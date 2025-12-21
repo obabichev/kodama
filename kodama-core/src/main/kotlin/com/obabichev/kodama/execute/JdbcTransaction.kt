@@ -1,5 +1,6 @@
 package com.obabichev.kodama.execute
 
+import com.obabichev.kodama.components.Column
 import com.obabichev.kodama.components.ColumnType
 import com.obabichev.kodama.insert.InsertResult
 import com.obabichev.kodama.insert.InsertStatement
@@ -50,17 +51,21 @@ class JdbcTransaction(
     }
 
     /**
-     * Execute an UPDATE/INSERT/DELETE with parameters using a prepared statement.
-     * This is safe from SQL injection and efficient.
+     * Execute an UPDATE/INSERT/DELETE with column-aware parameters.
+     *
+     * Each parameter is paired with its Column definition, ensuring the correct type handling
+     * based on the Table schema. The Column's ColumnType handles the proper conversion to SQL types.
      *
      * @param sql SQL statement with ? placeholders
-     * @param params Parameters to bind to the placeholders
+     * @param params List of (Column, value) pairs in the order they appear in the SQL
      * @return Number of rows affected
      */
-    fun executeUpdate(sql: String, vararg params: Any?): Int {
+    fun executeUpdate(sql: String, params: List<Pair<Column<*>, Any?>>): Int {
         val preparedStatement = connection.prepareStatement(sql)
-        params.forEachIndexed { index, param ->
-            preparedStatement.setObject(index + 1, param)
+        params.forEachIndexed { index, (column, value) ->
+            @Suppress("UNCHECKED_CAST")
+            val columnType = column.type as ColumnType<Any?>
+            columnType.setValue(preparedStatement, index + 1, value)
         }
         val result = preparedStatement.executeUpdate()
         preparedStatement.close()

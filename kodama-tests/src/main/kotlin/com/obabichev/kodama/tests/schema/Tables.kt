@@ -76,6 +76,7 @@ object Numerics : Table("numerics") {
     val decimalValue = decimal("decimal_value", 10, 2)  // NUMERIC(10,2)
     val realValue = real("real_value")
     val doubleValue = doublePrecision("double_value")
+
     // Nullable columns
     val nullableSmallInt = smallint("nullable_small_int").nullable()
     val nullableBigInt = bigint("nullable_big_int").nullable()
@@ -170,4 +171,20 @@ object MarketData : Table("market_data") {
     val strategyId = integer("strategy_id")
     val timestamp = varchar("timestamp", 50)
     val price = integer("price")
+}
+
+/**
+ * Events table - DateTime column types testing.
+ * Tests date, time, timestamp, and interval column types.
+ */
+object Events : Table("events") {
+    val id = integer("id").primaryKey()
+    val eventDate = date("event_date")
+    val eventTime = time("event_time")
+    val createdAt = timestamp("created_at")
+    val scheduledFor = timestamp("scheduled_for").nullable()
+    val eventTimestamp = timestampWithTimeZone("event_timestamp")
+    val reminderTime = timeWithTimeZone("reminder_time")
+    val duration = interval("duration")
+    val optionalDuration = interval("optional_duration").nullable()
 }

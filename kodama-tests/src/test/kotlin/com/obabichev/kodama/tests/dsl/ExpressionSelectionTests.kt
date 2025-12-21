@@ -30,9 +30,8 @@ class ExpressionSelectionTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Person)
-                .select_isOld { person.age gt 30 }
+            val results = from(Person)
+                .selectAliased(IsOld) { person.age gt 30 }
                 .execute(this)
 
             val resultList = results.toList()
@@ -51,24 +50,36 @@ class ExpressionSelectionTests : DatabaseTest() {
             person("bob", age = 30)
         }
 
+        // Test IsYoung separately
         withConnection {
-            val results = query()
-                .from(Person)
-                .select_isYoung { person.age lt 30 }
-                .select_isAdult { person.age gte 18 }
+            val youngResults = from(Person)
+                .selectAliased(IsYoung) { person.age lt 30 }
                 .execute(this)
 
-            val resultList = results.toList()
-            assertEquals(2, resultList.size, "Should have 2 rows")
+            val youngList = youngResults.toList()
+            assertEquals(2, youngList.size, "Should have 2 rows")
 
-            // Verify the expressions are accessible
-            resultList.forEach { row ->
-                // Both should have values for isYoung and isAdult
+            // alice: age 25 -> isYoung = true
+            // bob: age 30 -> isYoung = false
+            youngList.forEach { row ->
                 val isYoung = row.isYoung
+                assertTrue(isYoung != null, "isYoung should be present")
+            }
+        }
+
+        // Test IsAdult separately
+        withConnection {
+            val adultResults = from(Person)
+                .selectAliased(IsAdult) { person.age gte 18 }
+                .execute(this)
+
+            val adultList = adultResults.toList()
+            assertEquals(2, adultList.size, "Should have 2 rows")
+
+            // Both alice (25) and bob (30) are adults (>= 18)
+            adultList.forEach { row ->
                 val isAdult = row.isAdult
-                // Just checking they're not null
-                assertTrue(isYoung != null || isYoung == null, "isYoung should exist")
-                assertTrue(isAdult != null || isAdult == null, "isAdult should exist")
+                assertTrue(isAdult as Boolean, "Both should be adults")
             }
         }
     }
@@ -82,9 +93,8 @@ class ExpressionSelectionTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Person)
-                .select_inRange { (person.age gte 25) and (person.age lte 30) }
+            val results = from(Person)
+                .selectAliased(InRange) { (person.age gte 25) and (person.age lte 30) }
                 .execute(this)
 
             val resultList = results.toList()
@@ -101,9 +111,8 @@ class ExpressionSelectionTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Person)
-                .select_isThirty { person.age eq 30 }
+            val results = from(Person)
+                .selectAliased(IsThirty) { person.age eq 30 }
                 .execute(this)
 
             val resultList = results.toList()
@@ -123,9 +132,8 @@ class ExpressionSelectionTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Person)
-                .select_notThirty { person.age neq 30 }
+            val results = from(Person)
+                .selectAliased(NotThirty) { person.age neq 30 }
                 .execute(this)
 
             val resultList = results.toList()

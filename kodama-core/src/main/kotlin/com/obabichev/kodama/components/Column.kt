@@ -6,7 +6,7 @@ package com.obabichev.kodama.components
  *
  * @param T The Kotlin type of the column value (String, Int, etc.)
  */
-class Column<T>(
+open class Column<T>(
     val name: String,
     val relation: Relation,
     val type: ColumnType<T>,

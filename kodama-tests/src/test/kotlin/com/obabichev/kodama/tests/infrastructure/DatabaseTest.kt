@@ -27,7 +27,7 @@ import kotlin.test.BeforeTest
  *         }
  *
  *         withConnection {
- *             val results = query().from(Person).execute(this)
+ *             val results = from(Person).execute(this)
  *             // assertions...
  *         }
  *     }

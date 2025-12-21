@@ -102,3 +102,34 @@ class Max<T : Comparable<T>>(
     column: Column<T>,
     alias: String? = null
 ) : AggregateFunction<T>("MAX", column, alias)
+
+/**
+ * Type-safe aliasing using marker interfaces.
+ * Usage: sum(order.cost).aliasAs<TotalRevenue>()
+ *
+ * Returns an AliasedExpression<T> that carries the marker type at compile-time,
+ * enabling fully type-safe result accessors.
+ *
+ * The marker interface name is converted to:
+ * - snake_case for SQL: TotalRevenue -> total_revenue
+ * - camelCase for accessor: TotalRevenue -> totalRevenue
+ *
+ * @param T The marker interface type
+ * @return AliasedExpression carrying both the aggregate and marker information
+ */
+inline fun <reified T : Any> AggregateFunction<*>.aliasAs(): AliasedExpression<T> {
+    val markerClass = T::class
+    val interfaceName = markerClass.simpleName
+        ?: throw IllegalArgumentException("Marker must be a named interface")
+
+    // Convert PascalCase to snake_case for SQL alias
+    val sqlAlias = interfaceName
+        .replaceFirstChar { it.lowercase() }
+        .replace(Regex("([a-z])([A-Z])"), "$1_$2")
+        .lowercase()
+
+    // Set the alias on the aggregate function itself
+    this.alias(sqlAlias)
+
+    return AliasedExpression(this, markerClass, sqlAlias)
+}
