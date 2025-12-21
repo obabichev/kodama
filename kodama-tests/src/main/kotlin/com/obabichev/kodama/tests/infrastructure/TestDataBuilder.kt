@@ -194,6 +194,48 @@ class TestDataBuilder(private val transaction: JdbcTransaction) {
             nullableSmallInt, nullableBigInt, nullableDecimal, nullableReal, nullableDouble
         )
     }
+
+    /**
+     * Insert a trading strategy record.
+     *
+     * @param id Primary key, must be unique
+     * @param strategyName Strategy name
+     * @param description Optional strategy description
+     * @return The inserted trading strategy data for reference
+     */
+    fun tradingStrategy(
+        id: Int,
+        strategyName: String,
+        description: String? = null
+    ): InsertedTradingStrategy {
+        transaction.executeUpdate(
+            "INSERT INTO trading_strategy (id, strategy_name, description) VALUES (?, ?, ?)",
+            id, strategyName, description
+        )
+        return InsertedTradingStrategy(id, strategyName, description)
+    }
+
+    /**
+     * Insert a market data record.
+     *
+     * @param id Primary key, must be unique
+     * @param strategyId Foreign key reference to trading_strategy.id
+     * @param timestamp Timestamp of the market data
+     * @param price Price value
+     * @return The inserted market data for reference
+     */
+    fun marketData(
+        id: Int,
+        strategyId: Int,
+        timestamp: String,
+        price: Int
+    ): InsertedMarketData {
+        transaction.executeUpdate(
+            "INSERT INTO market_data (id, strategy_id, timestamp, price) VALUES (?, ?, ?, ?)",
+            id, strategyId, timestamp, price
+        )
+        return InsertedMarketData(id, strategyId, timestamp, price)
+    }
 }
 
 /**
@@ -230,4 +272,15 @@ data class InsertedNumerics(
     val nullableDecimal: BigDecimal?,
     val nullableReal: Float?,
     val nullableDouble: Double?
+)
+data class InsertedTradingStrategy(
+    val id: Int,
+    val strategyName: String,
+    val description: String?
+)
+data class InsertedMarketData(
+    val id: Int,
+    val strategyId: Int,
+    val timestamp: String,
+    val price: Int
 )

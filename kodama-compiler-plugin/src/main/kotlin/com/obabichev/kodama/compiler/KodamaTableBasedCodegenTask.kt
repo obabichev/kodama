@@ -2,6 +2,7 @@ package com.obabichev.kodama.compiler
 
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.provider.Property
 import org.gradle.api.tasks.*
 import java.io.File
 
@@ -26,6 +27,12 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
     @get:OutputDirectory
     abstract val outputDir: DirectoryProperty
 
+    @get:Input
+    abstract val schemaPackage: Property<String>
+
+    @get:Input
+    abstract val generatedPackage: Property<String>
+
     init {
         testDir.convention(project.layout.projectDirectory.dir("src/test/kotlin"))
         schemaDir.convention(project.layout.projectDirectory.dir("src/main/kotlin"))
@@ -34,10 +41,16 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
     @TaskAction
     fun generate() {
-        val queryOutputFile = outputDir.get().asFile.resolve("com/obabichev/kodama/tests/data/QueryExtensions.kt")
+        val genPkg = generatedPackage.get()
+        val schemaPkg = schemaPackage.get()
+
+        // Convert package name to file path (com.example.package -> com/example/package)
+        val genPkgPath = genPkg.replace('.', '/')
+        val queryOutputFile = outputDir.get().asFile.resolve("$genPkgPath/QueryExtensions.kt")
 
         // Discover tables by scanning schema files
         val tables = mutableSetOf<String>()
+        val tableNameMap = mutableMapOf<String, String>()  // lowercase -> original case mapping
         val tableToProperties = mutableMapOf<String, List<String>>()
         val tableToPropertyTypes = mutableMapOf<String, Map<String, String>>()
         val tableToPropertyNullability = mutableMapOf<String, Map<String, Boolean>>()
@@ -50,9 +63,10 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
             // Match: object TableName : Table("...") { ... }
             val tablePattern = """object\s+(\w+)\s*:\s*Table\s*\([^)]*\)\s*\{([^}]*)\}""".toRegex()
             tablePattern.findAll(content).forEach { match ->
-                val tableName = match.groupValues[1].lowercase()
+                val tableName = match.groupValues[1]  // Preserve original case: "TradingStrategy"
                 val tableBody = match.groupValues[2]
                 tables.add(tableName)
+                tableNameMap[tableName.lowercase()] = tableName  // Map lowercase to original case
 
                 // Extract properties from table body with their types and nullability
                 // Match patterns like: val name = varchar(...).primaryKey() or val age = integer(...).nullable()
@@ -123,6 +137,14 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
         testFiles.forEach { file ->
             val content = file.readText()
 
+            // Use scanners to detect selection patterns
+            scanners.forEach { scanner ->
+                val patterns = scanner.scanFile(content, tableNameMap)
+                patterns.forEach { pattern ->
+                    selectionPatternsByTable.getOrPut(pattern.tables) { mutableSetOf() }.add(pattern)
+                }
+            }
+
             // Match query chains: query().from(Table).join(Table)...
             // Look for query().from(...) and then capture everything until .select or .where or end
             val queryChainPattern = """query\s*\(\s*\)\s*\.from\s*\([^)]+\)(?:\s*\.join\s*\([^)]+\)(?:\s*\{[^}]*\})?)*""".toRegex()
@@ -134,7 +156,8 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                 // Extract table names from the chain
                 val tableRefPattern = """(?:from|join)\s*\(\s*(\w+)""".toRegex()
                 tableRefPattern.findAll(chain).forEach { typeMatch ->
-                    val tableName = typeMatch.groupValues[1].lowercase()
+                    val tableRef = typeMatch.groupValues[1]
+                    val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef  // Use original case
                     typesInChain.add(tableName)
                 }
 
@@ -173,7 +196,9 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                 val tablesInQuery = linkedSetOf<String>()
                 val tableRefPattern = """(?:from|join)\s*\(\s*(\w+)""".toRegex()
                 tableRefPattern.findAll(queryChain).forEach { typeMatch ->
-                    tablesInQuery.add(typeMatch.groupValues[1].lowercase())
+                    val tableRef = typeMatch.groupValues[1]
+                    val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef  // Use original case
+                    tablesInQuery.add(tableName)
                 }
 
                 // Extract selection pattern - preserve order for HList type accumulation!
@@ -206,7 +231,8 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     // Check for aggregate functions in the block
                     aggregatePattern.findAll(blockContent).forEach { aggMatch ->
                         val funcName = aggMatch.groupValues[1]
-                        val tableName = aggMatch.groupValues[2].ifEmpty { null }?.lowercase()
+                        val tableRef = aggMatch.groupValues[2].ifEmpty { null }
+                        val tableName = tableRef?.let { tableNameMap[it.lowercase()] ?: it }  // Use original case
                         val columnName = aggMatch.groupValues[3].ifEmpty { null }
                         val alias = aggMatch.groupValues[4].ifEmpty { null }
 
@@ -230,7 +256,8 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     if (!isAggregateBlock) {
                         val columnInBlockPattern = """\+?\s*(\w+)\.(\w+)""".toRegex()
                         columnInBlockPattern.findAll(blockContent).forEach { colMatch ->
-                        val tableName = colMatch.groupValues[1].lowercase()
+                        val tableRef = colMatch.groupValues[1]
+                        val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef  // Use original case
                         val columnName = colMatch.groupValues[2]
 
                         // Skip if this is inside an aggregate function call or an operator expression
@@ -262,7 +289,8 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     // Check for .all() selections
                     val allInBlockPattern = """\+\s*(\w+)\.all\s*\(\s*\)""".toRegex()
                     allInBlockPattern.findAll(blockContent).forEach { allMatch ->
-                        val tableName = allMatch.groupValues[1].lowercase()
+                        val tableRef = allMatch.groupValues[1]
+                        val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef  // Use original case
                         val selection = "$tableName:All"
                         if (selection !in selections) {
                             selections.add(selection)
@@ -272,7 +300,8 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
                 // Also handle .selectAll() direct calls (outside blocks)
                 selectAllDirectPattern.findAll(queryChain).forEach { match ->
-                    val tableName = match.groupValues[1].lowercase()
+                    val tableRef = match.groupValues[1]
+                    val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef  // Use original case
                     val selection = "$tableName:All"
                     if (selection !in selections) {
                         selections.add(selection)
@@ -292,14 +321,6 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                 }
 
             }
-
-            // Use scanners to discover selection patterns
-            scanners.forEach { scanner ->
-                val patterns = scanner.scanFile(content)
-                patterns.forEach { pattern ->
-                    selectionPatternsByTable.getOrPut(pattern.tables) { mutableSetOf() }.add(pattern)
-                }
-            }
         }
 
         // Generate query extensions
@@ -307,11 +328,11 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
         queryOutputFile.writeText(buildString {
             appendLine("@file:Suppress(\"UNCHECKED_CAST\")")
             appendLine()
-            appendLine("package com.obabichev.kodama.tests.data")
+            appendLine("package $genPkg")
             appendLine()
             appendLine("import com.obabichev.kodama.components.JoinType")
             appendLine("import com.obabichev.kodama.query.*")
-            appendLine("import com.obabichev.kodama.tests.schema.*")
+            appendLine("import $schemaPkg.*")
             appendLine("import com.obabichev.kodama.schema.Table")
             appendLine()
             appendLine("// AUTO-GENERATED by Kodama Compiler Plugin")
@@ -384,7 +405,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
             // Generate extension functions on Table objects for .all()
             tables.forEach { tableName ->
                 val capitalizedName = tableName.replaceFirstChar { it.uppercase() }
-                appendLine("fun com.obabichev.kodama.tests.schema.$capitalizedName.all() = ${capitalizedName}AllMarker(this)")
+                appendLine("fun $schemaPkg.$capitalizedName.all() = ${capitalizedName}AllMarker(this)")
             }
             appendLine()
 
@@ -413,7 +434,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     val isNullable = propertyNullability[propName] ?: true
                     val nullabilityMarker = if (isNullable) "?" else ""
                     appendLine("    val $propName: com.obabichev.kodama.components.TypedColumn<$kotlinType$nullabilityMarker, ${capitalizedName}Table, $propCapitalized>")
-                    appendLine("        get() = com.obabichev.kodama.components.TypedColumn(com.obabichev.kodama.tests.schema.$capitalizedName.$propName)")
+                    appendLine("        get() = com.obabichev.kodama.components.TypedColumn($schemaPkg.$capitalizedName.$propName)")
                     appendLine()
                 }
 
@@ -430,7 +451,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
                 properties.forEach { propName ->
                     appendLine("    val $propName")
-                    appendLine("        get() = com.obabichev.kodama.query.OrderByColumn(com.obabichev.kodama.tests.schema.$capitalizedName.$propName)")
+                    appendLine("        get() = com.obabichev.kodama.query.OrderByColumn($schemaPkg.$capitalizedName.$propName)")
                     appendLine()
                 }
 
@@ -497,7 +518,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     val capitalizedName = tableName.replaceFirstChar { it.uppercase() }
 
                     // Start with com.obabichev.kodama.query.NoColumnsSelected for the table and NoSelections
-                    appendLine("fun InitialQueryBuilder<NoSelection>.from(table: com.obabichev.kodama.tests.schema.$capitalizedName): $builderClassName<com.obabichev.kodama.query.NoColumnsSelected, NoSelections> {")
+                    appendLine("fun InitialQueryBuilder<NoSelection>.from(table: $schemaPkg.$capitalizedName): $builderClassName<com.obabichev.kodama.query.NoColumnsSelected, NoSelections> {")
                     appendLine("    state._from = state.relations.relation(table)")
                     appendLine("    return $builderClassName(state)")
                     appendLine("}")
@@ -523,9 +544,11 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
                             combination.forEach { existingTable ->
                                 val existingCapitalized = existingTable.replaceFirstChar { it.uppercase() }
-                                appendLine("    val $existingTable = ${existingCapitalized}Accessor(TableAccessor(com.obabichev.kodama.tests.schema.$existingCapitalized, state.relations))")
+                                val existingProperty = existingTable.replaceFirstChar { it.lowercase() }  // Property name in camelCase
+                                appendLine("    val $existingProperty = ${existingCapitalized}Accessor(TableAccessor($schemaPkg.$existingCapitalized, state.relations))")
                             }
-                            appendLine("    val $newTable = ${newTableCapitalized}Accessor(TableAccessor(com.obabichev.kodama.tests.schema.$newTableCapitalized, state.relations))")
+                            val newProperty = newTable.replaceFirstChar { it.lowercase() }  // Property name in camelCase
+                            appendLine("    val $newProperty = ${newTableCapitalized}Accessor(TableAccessor($schemaPkg.$newTableCapitalized, state.relations))")
 
                             appendLine("}")
                             appendLine()
@@ -538,7 +561,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
                             appendLine("@JvmName(\"$jvmName\")")
                             appendLine("fun <$existingGenericParamsWithAC> $builderClassName<$existingGenericParams, AC>.join(")
-                            appendLine("    table: com.obabichev.kodama.tests.schema.$newTableCapitalized,")
+                            appendLine("    table: $schemaPkg.$newTableCapitalized,")
                             appendLine("    type: JoinType = JoinType.INNER,")
                             appendLine("    condition: $joinContextClassName.() -> Pair<com.obabichev.kodama.components.Column<*>, com.obabichev.kodama.components.Column<*>>")
                             appendLine("): $newBuilderClassName<$newGenericParamsWithAC> {")
@@ -560,7 +583,8 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
                 combination.forEach { tableName ->
                     val capitalizedName = tableName.replaceFirstChar { it.uppercase() }
-                    appendLine("    val $tableName = ${capitalizedName}Accessor(TableAccessor(com.obabichev.kodama.tests.schema.$capitalizedName, state.relations))")
+                    val propertyName = tableName.replaceFirstChar { it.lowercase() }  // Property name in camelCase
+                    appendLine("    val $propertyName = ${capitalizedName}Accessor(TableAccessor($schemaPkg.$capitalizedName, state.relations))")
                 }
 
                 appendLine("}")
@@ -590,7 +614,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     val afterGenericForAllWithAC = if (afterGenericForAll.isEmpty()) "AC" else "$afterGenericForAll, AC"
 
                     appendLine("@JvmName(\"select${capitalizedName}All\")")
-                    appendLine("fun <$beforeParamsWithAC> $builderClassName<$beforeGenericWithAC>.selectAll(table: com.obabichev.kodama.tests.schema.$capitalizedName): $builderClassName<$afterGenericForAllWithAC> {")
+                    appendLine("fun <$beforeParamsWithAC> $builderClassName<$beforeGenericWithAC>.selectAll(table: $schemaPkg.$capitalizedName): $builderClassName<$afterGenericForAllWithAC> {")
                     appendLine("    val result = com.obabichev.kodama.query.TableAllSelection(table, table.allColumns())")
                     appendLine("    state.applySelection(result)")
                     appendLine("    return $builderClassName(state)")
@@ -833,7 +857,8 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
                 combination.forEach { tableName ->
                     val capitalizedName = tableName.replaceFirstChar { it.uppercase() }
-                    appendLine("    val $tableName = ${capitalizedName}Accessor(TableAccessor(com.obabichev.kodama.tests.schema.$capitalizedName, state.relations))")
+                    val propertyName = tableName.replaceFirstChar { it.lowercase() }  // Property name in camelCase
+                    appendLine("    val $propertyName = ${capitalizedName}Accessor(TableAccessor($schemaPkg.$capitalizedName, state.relations))")
                 }
 
                 appendLine("}")
@@ -855,7 +880,8 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
                 combination.forEach { tableName ->
                     val capitalizedName = tableName.replaceFirstChar { it.uppercase() }
-                    appendLine("    val $tableName = ${capitalizedName}OrderByAccessor(TableAccessor(com.obabichev.kodama.tests.schema.$capitalizedName, state.relations))")
+                    val propertyName = tableName.replaceFirstChar { it.lowercase() }  // Property name in camelCase
+                    appendLine("    val $propertyName = ${capitalizedName}OrderByAccessor(TableAccessor($schemaPkg.$capitalizedName, state.relations))")
                 }
 
                 appendLine("}")
@@ -967,7 +993,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                             val isNullable = propertyNullability[propName] ?: true
                             val nullabilityMarker = if (isNullable) "?" else ""
                             appendLine("    val $propName: $kotlinType$nullabilityMarker")
-                            appendLine("        get() = readColumn(com.obabichev.kodama.tests.schema.$capitalizedName.$propName) as $kotlinType$nullabilityMarker")
+                            appendLine("        get() = readColumn($schemaPkg.$capitalizedName.$propName) as $kotlinType$nullabilityMarker")
                             appendLine()
                         }
 
@@ -995,7 +1021,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                             val isNullable = propertyNullability[propName] ?: true
                             val nullabilityMarker = if (isNullable) "?" else ""
                             appendLine("    val $propName: $kotlinType$nullabilityMarker")
-                            appendLine("        get() = readColumn(com.obabichev.kodama.tests.schema.$capitalizedName.$propName) as $kotlinType$nullabilityMarker")
+                            appendLine("        get() = readColumn($schemaPkg.$capitalizedName.$propName) as $kotlinType$nullabilityMarker")
                             appendLine()
 
                             appendLine("}")
@@ -1030,11 +1056,11 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                                     val nullMarker2 = if (nullable2) "?" else ""
 
                                     appendLine("    val $prop1: $type1$nullMarker1")
-                                    appendLine("        get() = readColumn(com.obabichev.kodama.tests.schema.$capitalizedName.$prop1) as $type1$nullMarker1")
+                                    appendLine("        get() = readColumn($schemaPkg.$capitalizedName.$prop1) as $type1$nullMarker1")
                                     appendLine()
 
                                     appendLine("    val $prop2: $type2$nullMarker2")
-                                    appendLine("        get() = readColumn(com.obabichev.kodama.tests.schema.$capitalizedName.$prop2) as $type2$nullMarker2")
+                                    appendLine("        get() = readColumn($schemaPkg.$capitalizedName.$prop2) as $type2$nullMarker2")
                                     appendLine()
 
                                     appendLine("}")
@@ -1075,14 +1101,16 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
                                     // Generate properties for each selected column
                                     types.forEach { type ->
-                                        val propName = type.lowercase()
+                                        // Convert PascalCase type marker back to camelCase property name
+                                        // e.g., "OpenPrice" -> "openPrice", not "openprice"
+                                        val propName = type.replaceFirstChar { it.lowercase() }
                                         if (propName in properties) {
                                             val kotlinType = propertyTypes[propName] ?: "Any"
                                             val isNullable = propertyNullability[propName] ?: true
                                             val nullabilityMarker = if (isNullable) "?" else ""
 
                                             appendLine("    val $propName: $kotlinType$nullabilityMarker")
-                                            appendLine("        get() = readColumn(com.obabichev.kodama.tests.schema.$tableCapitalized.$propName) as $kotlinType$nullabilityMarker")
+                                            appendLine("        get() = readColumn($schemaPkg.$tableCapitalized.$propName) as $kotlinType$nullabilityMarker")
                                             appendLine()
                                         }
                                     }
@@ -1152,7 +1180,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
                     selectionsByTable.forEach { (table, selections) ->
                         val tableCapitalized = table.replaceFirstChar { it.uppercase() }
-                        val accessorName = table  // Just use table name
+                        val accessorName = table.replaceFirstChar { it.lowercase() }  // Property name in camelCase
 
                         // Determine accessor class based on what was selected
                         val types = selections.map { it.split(":")[1] }
@@ -1161,14 +1189,10 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                             "${tableCapitalized}ResultAccessor_All"
                         } else if (types.size == 1) {
                             // Single column selection
-                            val typeWithUnderscores = types[0].replace(Regex("(?<!^)(?=[A-Z])"), "_")
-                            "${tableCapitalized}ResultAccessor_$typeWithUnderscores"
+                            "${tableCapitalized}ResultAccessor_${types[0]}"
                         } else {
                             // Multiple column selections - create combined name
-                            val combinedTypes = types.map { type ->
-                                if (type == "All") "All"
-                                else type.replace(Regex("(?<!^)(?=[A-Z])"), "_")
-                            }.joinToString("_")
+                            val combinedTypes = types.joinToString("_")
                             "${tableCapitalized}ResultAccessor_$combinedTypes"
                         }
 
@@ -1252,6 +1276,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     // Generate table accessors for column selections
                     pattern.columnSelections.forEach { (tableName, columns) ->
                         val tableCapitalized = tableName.replaceFirstChar { it.uppercase() }
+                        val propertyName = tableName.replaceFirstChar { it.lowercase() }  // Property name in camelCase
 
                         // Determine which accessor class to use based on what was selected
                         val accessorClass = if (columns.contains("All")) {
@@ -1265,7 +1290,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                             "${tableCapitalized}ResultAccessor_$combinedCols"
                         }
 
-                        appendLine("    val $tableName: $accessorClass")
+                        appendLine("    val $propertyName: $accessorClass")
                         appendLine("        get() = $accessorClass(resultSet, relations, selectedColumns)")
                         appendLine()
                     }
@@ -1436,7 +1461,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                 }
                 appendLine(" * @return InsertResult with rows affected and generated keys")
                 appendLine(" */")
-                appendLine("fun com.obabichev.kodama.tests.schema.$capitalizedTableName.insert(")
+                appendLine("fun $schemaPkg.$capitalizedTableName.insert(")
                 appendLine("    $parameters")
                 appendLine("): com.obabichev.kodama.insert.InsertResult {")
                 appendLine("    val table = this")
@@ -2117,7 +2142,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
         // Build table name to entity name map and table package map for lookup
         val tableToEntityName = matches.associate { (table, interface_) ->
-            table.tableName.lowercase() to interface_.name
+            table.tableName to interface_.name  // Use original case
         }
         val tableToPackage = matches.associate { (table, _) ->
             table.tableName to table.packageName
@@ -2151,7 +2176,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                 val sourceTablePattern = """object\s+(\w+)\s*:\s*EntityTable<(\w+)>\s*\([^)]*\)\s*\{[^}]*init\s*\{[^}]*oneToMany\s*\(\s*"$relationshipName"""".toRegex()
                 sourceTablePattern.find(content)?.let { tableMatch ->
                     val sourceEntityName = tableMatch.groupValues[2]
-                    val targetEntity = tableToEntityName[targetTableName.lowercase()] ?: "Unknown"
+                    val targetEntity = tableToEntityName[targetTableName] ?: "Unknown"  // Use original case
                     val targetPackage = tableToPackage[targetTableName] ?: filePackage
 
                     relationships.add(
@@ -2179,7 +2204,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                 val sourceTablePattern = """object\s+(\w+)\s*:\s*EntityTable<(\w+)>\s*\([^)]*\)\s*\{[^}]*init\s*\{[^}]*manyToOne\s*\(\s*"$relationshipName"""".toRegex()
                 sourceTablePattern.find(content)?.let { tableMatch ->
                     val sourceEntityName = tableMatch.groupValues[2]
-                    val targetEntity = tableToEntityName[targetTableName.lowercase()] ?: "Unknown"
+                    val targetEntity = tableToEntityName[targetTableName] ?: "Unknown"  // Use original case
                     val targetPackage = tableToPackage[targetTableName] ?: filePackage
 
                     relationships.add(
@@ -2214,7 +2239,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
         // Build table name to entity name map and table package map for lookup
         val tableToEntityName = matches.associate { (table, interface_) ->
-            table.tableName.lowercase() to interface_.name
+            table.tableName to interface_.name  // Use original case
         }
         val tableToPackage = matches.associate { (table, _) ->
             table.tableName to table.packageName
@@ -2248,7 +2273,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                 val sourceTablePattern = """object\s+(\w+)\s*:\s*EntityTable<(\w+)>\s*\([^)]*\)\s*\{[^}]*init\s*\{[^}]*oneToMany\s*\(\s*"$relationshipName"""".toRegex()
                 sourceTablePattern.find(content)?.let { tableMatch ->
                     val sourceEntityName = tableMatch.groupValues[2]
-                    val targetEntity = tableToEntityName[targetTableName.lowercase()] ?: "Unknown"
+                    val targetEntity = tableToEntityName[targetTableName] ?: "Unknown"  // Use original case
                     val targetPackage = tableToPackage[targetTableName] ?: filePackage
 
                     relationships.add(

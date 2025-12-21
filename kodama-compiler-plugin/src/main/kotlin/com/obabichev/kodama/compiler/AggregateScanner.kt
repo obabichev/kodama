@@ -5,7 +5,7 @@ package com.obabichev.kodama.compiler
  * Matches patterns like: .selectAggregate { sum(order.cost) alias "totalRevenue" }
  */
 class AggregateScanner : SelectionPatternScanner {
-    override fun scanFile(content: String): List<SelectionPattern> {
+    override fun scanFile(content: String, tableNameMap: Map<String, String>): List<SelectionPattern> {
         val patterns = mutableListOf<SelectionPattern>()
 
         // Match complete query chains with selectAggregate calls
@@ -18,7 +18,8 @@ class AggregateScanner : SelectionPatternScanner {
             val tables = mutableListOf<String>()
             val tableRefPattern = """(?:from|join)\s*\(\s*(\w+)""".toRegex()
             tableRefPattern.findAll(queryChain).forEach { match ->
-                val tableName = match.groupValues[1].lowercase()
+                val tableRef = match.groupValues[1]
+                val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef  // Use original case
                 if (!tables.contains(tableName)) {
                     tables.add(tableName)
                 }
@@ -80,7 +81,8 @@ class AggregateScanner : SelectionPatternScanner {
             // Pattern: .select { table.column }
             val regularSelectPattern = """\.select\s*\{\s*(\w+)\.(\w+)\s*\}""".toRegex()
             regularSelectPattern.findAll(queryChain).forEach { match ->
-                val tableName = match.groupValues[1].lowercase()
+                val tableRef = match.groupValues[1]
+                val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef  // Use original case
                 val columnName = match.groupValues[2]
 
                 // Track this column selection
@@ -90,7 +92,8 @@ class AggregateScanner : SelectionPatternScanner {
             // Pattern: .selectAll(Table)
             val selectAllPattern = """\.selectAll\s*\(\s*(\w+)\s*\)""".toRegex()
             selectAllPattern.findAll(queryChain).forEach { match ->
-                val tableName = match.groupValues[1].lowercase()
+                val tableRef = match.groupValues[1]
+                val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef  // Use original case
 
                 // Track this as "All" for the table
                 columnSelectionsByTable.getOrPut(tableName) { mutableListOf() }.add("All")

@@ -150,3 +150,24 @@ object Users : EntityTable<User>("users") {
         oneToMany("orders", UserOrders, UserOrders.userId, this.id)
     }
 }
+
+/**
+ * TradingStrategy table - PascalCase naming test.
+ * Tests that PascalCase table names are preserved correctly.
+ */
+object TradingStrategy : Table("trading_strategy") {
+    val id = integer("id").primaryKey()
+    val strategyName = varchar("strategy_name", 255)
+    val description = varchar("description", 500).nullable()
+}
+
+/**
+ * MarketData table - PascalCase naming test.
+ * Tests that PascalCase table names work in joins.
+ */
+object MarketData : Table("market_data") {
+    val id = integer("id").primaryKey()
+    val strategyId = integer("strategy_id")
+    val timestamp = varchar("timestamp", 50)
+    val price = integer("price")
+}
