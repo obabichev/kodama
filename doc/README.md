@@ -17,11 +17,11 @@ Add Kodama to your `build.gradle.kts`:
 
 ```kotlin
 plugins {
-    id("com.obabichev.kodama") version "0.2.0"
+    id("com.obabichev.kodama") version "0.3.0"
 }
 
 dependencies {
-    implementation("com.obabichev.kodama:kodama-core:0.2.0")
+    implementation("com.obabichev.kodama:kodama-core:0.3.0")
 
     // SLF4J logging implementation (required)
     implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")

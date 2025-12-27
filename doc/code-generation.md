@@ -65,7 +65,7 @@ Add the plugin to `build.gradle.kts`:
 
 ```kotlin
 plugins {
-    id("com.obabichev.kodama") version "0.2.0"
+    id("com.obabichev.kodama") version "0.3.0"
 }
 ```
 

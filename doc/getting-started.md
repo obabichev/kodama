@@ -21,11 +21,11 @@ Once published to Maven Central, simply add Kodama to your `build.gradle.kts`:
 
 ```kotlin
 plugins {
-    id("com.obabichev.kodama") version "0.2.0"
+    id("com.obabichev.kodama") version "0.3.0"
 }
 
 dependencies {
-    implementation("com.obabichev.kodama:kodama-core:0.2.0")
+    implementation("com.obabichev.kodama:kodama-core:0.3.0")
 
     // SLF4J logging implementation (required - choose one)
     implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")
@@ -86,11 +86,11 @@ Now you can use Kodama in your `build.gradle.kts`:
 
 ```kotlin
 plugins {
-    id("com.obabichev.kodama") version "0.2.0"
+    id("com.obabichev.kodama") version "0.3.0"
 }
 
 dependencies {
-    implementation("com.obabichev.kodama:kodama-core:0.2.0")
+    implementation("com.obabichev.kodama:kodama-core:0.3.0")
 
     // SLF4J logging implementation (required)
     implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")
@@ -194,7 +194,7 @@ Here's a complete `build.gradle.kts` with all required dependencies:
 ```kotlin
 plugins {
     kotlin("jvm") version "2.2.0"
-    id("com.obabichev.kodama") version "0.2.0"
+    id("com.obabichev.kodama") version "0.3.0"
 }
 
 repositories {
@@ -210,7 +210,7 @@ kotlin {
 
 dependencies {
     // Kodama
-    implementation("com.obabichev.kodama:kodama-core:0.2.0")
+    implementation("com.obabichev.kodama:kodama-core:0.3.0")
 
     // Logging (required - choose one)
     implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")
@@ -453,6 +453,60 @@ Order.insert(
 - Nullable columns have `Type?` parameter
 - Returns `InsertResult` with `rowsAffected` and `generatedKeys`
 - Proper NULL handling in prepared statements
+
+### Auto-Increment Columns
+
+Kodama supports PostgreSQL's SERIAL types and SQL standard IDENTITY columns for auto-generated IDs.
+Auto-generated columns are **automatically excluded** from `insert()` method parameters:
+
+```kotlin
+// Define table with SERIAL primary key (PostgreSQL-specific)
+object Users : Table("users") {
+    val id = serial("id").primaryKey()  // Auto-generated!
+    val name = varchar("name", 255)
+    val email = varchar("email", 255)
+}
+
+// Or use SQL standard IDENTITY
+object Products : Table("products") {
+    val id = integer("id").identity().primaryKey()  // SQL standard
+    val name = varchar("name", 255)
+    val price = integer("price")
+}
+
+// INSERT - id parameter is automatically excluded!
+val result = Users.insert(
+    transaction = transaction,
+    name = "Alice",
+    email = "alice@example.com"
+    // No id parameter - it's auto-generated!
+)
+
+// Access the generated ID
+val generatedId = result.generatedKeys["id"] as Int
+println("Created user with ID: $generatedId")
+```
+
+**Available auto-increment types:**
+
+| Function | SQL Type | Kotlin Type | Range |
+|----------|----------|-------------|-------|
+| `serial("id")` | SERIAL | Int | 1 to 2,147,483,647 |
+| `bigserial("id")` | BIGSERIAL | Long | 1 to 9,223,372,036,854,775,807 |
+| `smallserial("id")` | SMALLSERIAL | Short | 1 to 32,767 |
+| `integer("id").identity()` | INTEGER GENERATED ALWAYS AS IDENTITY | Int | SQL standard |
+| `bigint("id").identity()` | BIGINT GENERATED ALWAYS AS IDENTITY | Long | SQL standard |
+| `smallint("id").identity()` | SMALLINT GENERATED ALWAYS AS IDENTITY | Short | SQL standard |
+
+**SERIAL vs IDENTITY:**
+- **SERIAL**: PostgreSQL-specific, simpler syntax, widely used
+- **IDENTITY**: SQL standard (SQL:2003), more portable to other databases
+
+**Key Features:**
+- Auto-generated columns are excluded from `insert()` parameters at compile-time
+- Generated IDs are returned in `InsertResult.generatedKeys` map
+- Type-safe: code won't compile if you try to provide a value for auto-generated columns
+- Works with any primary key or unique column
 
 ### Aggregate Functions
 

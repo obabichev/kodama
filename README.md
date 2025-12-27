@@ -2,7 +2,7 @@
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![Kotlin](https://img.shields.io/badge/kotlin-2.2.0+-blue.svg)](https://kotlinlang.org/)
-[![Version](https://img.shields.io/badge/version-0.2.0-orange.svg)]()
+[![Version](https://img.shields.io/badge/version-0.3.0-orange.svg)]()
 
 **Kodama** (Kotlin Data Mapper) is a type-safe SQL query builder for Kotlin and PostgreSQL. Unlike traditional ORMs,
 Kodama provides 100% compile-time type safety through code generation, eliminating runtime errors and reflection
@@ -29,11 +29,11 @@ Once published to Maven Central, simply add to your `build.gradle.kts`:
 
 ```kotlin
 plugins {
-    id("com.obabichev.kodama") version "0.2.0"
+    id("com.obabichev.kodama") version "0.3.0"
 }
 
 dependencies {
-    implementation("com.obabichev.kodama:kodama-core:0.2.0")
+    implementation("com.obabichev.kodama:kodama-core:0.3.0")
 
     // SLF4J logging implementation (choose one)
     implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")
@@ -89,11 +89,11 @@ dependencyResolutionManagement {
 
 ```kotlin
 plugins {
-    id("com.obabichev.kodama") version "0.2.0"
+    id("com.obabichev.kodama") version "0.3.0"
 }
 
 dependencies {
-    implementation("com.obabichev.kodama:kodama-core:0.2.0")
+    implementation("com.obabichev.kodama:kodama-core:0.3.0")
 
     // SLF4J logging implementation (required)
     implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")
@@ -368,6 +368,60 @@ Products.insert(
 ```sql
 INSERT INTO orders (id, user_id, product, cost)
 VALUES (?, ?, ?, ?)
+```
+
+### Auto-Increment Columns (SERIAL and IDENTITY)
+
+Database-generated IDs are automatically excluded from `insert()` parameters:
+
+```kotlin
+// Define table with SERIAL primary key (PostgreSQL-specific)
+object Users : Table("users") {
+    val id = serial("id").primaryKey()  // Auto-generated!
+    val name = varchar("name", 255)
+    val email = varchar("email", 255)
+}
+
+// Or use SQL standard IDENTITY
+object Products : Table("products") {
+    val id = integer("id").identity().primaryKey()  // SQL standard
+    val name = varchar("name", 255)
+    val price = integer("price")
+}
+
+// INSERT - id parameter is automatically excluded!
+val result = Users.insert(
+    transaction = transaction,
+    name = "Alice",
+    email = "alice@example.com"
+    // No id parameter needed!
+)
+
+// Access the generated ID
+val generatedId = result.generatedKeys["id"] as Int
+println("Created user with ID: $generatedId")
+```
+
+**Available auto-increment types:**
+- `serial("id")` → SERIAL (Int)
+- `bigserial("id")` → BIGSERIAL (Long, for large IDs)
+- `smallserial("id")` → SMALLSERIAL (Short, for small IDs)
+- `integer("id").identity()` → INTEGER GENERATED ALWAYS AS IDENTITY (SQL standard)
+- `bigint("id").identity()` → BIGINT GENERATED ALWAYS AS IDENTITY
+- `smallint("id").identity()` → SMALLINT GENERATED ALWAYS AS IDENTITY
+
+**Generates:**
+
+```sql
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL
+);
+
+INSERT INTO users (name, email)  -- id excluded!
+VALUES (?, ?)
+RETURNING id;  -- Generated ID returned automatically
 ```
 
 ### Entity Layer (ORM)
