@@ -32,14 +32,13 @@ class OrderByColumn<T>(private val column: Column<T>) {
 /**
  * Base context for ORDER BY clause
  * Subclasses will provide type-safe table accessors
+ *
+ * Usage:
+ * ```
+ * .orderBy { person.name.asc() }
+ * .orderBy { person.age.desc() }
+ * ```
+ *
+ * Each orderBy call returns exactly one OrderByClause and can be chained.
  */
-abstract class OrderByContext {
-    val orderByClauses = mutableListOf<OrderByClause>()
-
-    /**
-     * Implicitly add an ascending order clause
-     */
-    operator fun OrderByClause.unaryPlus() {
-        orderByClauses.add(this)
-    }
-}
+abstract class OrderByContext

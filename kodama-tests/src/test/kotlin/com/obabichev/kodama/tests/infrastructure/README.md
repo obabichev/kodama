@@ -51,8 +51,7 @@ class MyTest : DatabaseTest() {
 
         // Run query
         withConnection {
-            val results = query()
-                .from(Person)
+            val results = from(Person)
                 .join(Order) { order.userName eq person.name }
                 .execute(this)
 
@@ -75,7 +74,7 @@ class MyTest : DatabaseTest() {
 
         withConnection {
             // Data already present
-            val results = query().from(Person).execute(this)
+            val results = from(Person).execute(this)
             assertEquals(3, results.count()) // kodama, kokoro, pipiru
         }
     }

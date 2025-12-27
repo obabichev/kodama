@@ -2,13 +2,19 @@ package com.obabichev.kodama.tests.infrastructure
 
 import com.obabichev.kodama.components.Column
 import com.obabichev.kodama.components.types.BooleanColumnType
+import com.obabichev.kodama.components.types.DateColumnType
 import com.obabichev.kodama.components.types.DecimalColumnType
 import com.obabichev.kodama.components.types.DoubleColumnType
 import com.obabichev.kodama.components.types.FloatColumnType
 import com.obabichev.kodama.components.types.IntColumnType
+import com.obabichev.kodama.components.types.IntervalColumnType
 import com.obabichev.kodama.components.types.LongColumnType
 import com.obabichev.kodama.components.types.ShortColumnType
 import com.obabichev.kodama.components.types.StringColumnType
+import com.obabichev.kodama.components.types.TimeColumnType
+import com.obabichev.kodama.components.types.TimeWithTimeZoneColumnType
+import com.obabichev.kodama.components.types.TimestampColumnType
+import com.obabichev.kodama.components.types.TimestampWithTimeZoneColumnType
 import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.tests.schema.*
 
@@ -28,7 +34,10 @@ object TableRegistry {
         Profile,
         Product,
         Settings,
-        Numerics
+        Numerics,
+        TradingStrategy,
+        MarketData,
+        Events
     )
 
     /**
@@ -76,6 +85,12 @@ private fun Column<*>.toSQLType(): String {
         is DoubleColumnType -> " DOUBLE PRECISION"
         is StringColumnType -> " TEXT"
         is BooleanColumnType -> " BOOLEAN"
+        is DateColumnType -> " DATE"
+        is TimeColumnType -> " TIME"
+        is TimestampColumnType -> " TIMESTAMP"
+        is TimestampWithTimeZoneColumnType -> " TIMESTAMPTZ"
+        is TimeWithTimeZoneColumnType -> " TIMETZ"
+        is IntervalColumnType -> " INTERVAL"
         else -> throw IllegalArgumentException("Unsupported column type: ${type::class.simpleName}")
     }
 }

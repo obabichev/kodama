@@ -1,6 +1,6 @@
 package com.obabichev.kodama.tests.dsl
 
-import com.obabichev.kodama.query.query
+import com.obabichev.kodama.query.*
 import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.tests.schema.generated.*
 import com.obabichev.kodama.tests.infrastructure.DatabaseTest
@@ -60,8 +60,7 @@ class NumericColumnTypeTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Numerics)
+            val results = from(Numerics)
                 .selectAll(Numerics)
                 .execute(this)
 
@@ -115,8 +114,7 @@ class NumericColumnTypeTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Numerics)
+            val results = from(Numerics)
                 .selectAll(Numerics)
                 .execute(this)
 
@@ -170,8 +168,7 @@ class NumericColumnTypeTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Numerics)
+            val results = from(Numerics)
                 .selectAll(Numerics)
                 .execute(this)
 
@@ -225,8 +222,7 @@ class NumericColumnTypeTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Numerics)
+            val results = from(Numerics)
                 .selectAll(Numerics)
                 .execute(this)
 
@@ -280,8 +276,7 @@ class NumericColumnTypeTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Numerics)
+            val results = from(Numerics)
                 .selectAll(Numerics)
                 .execute(this)
 
@@ -336,8 +331,7 @@ class NumericColumnTypeTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Numerics)
+            val results = from(Numerics)
                 .selectAll(Numerics)
                 .execute(this)
 
@@ -390,8 +384,7 @@ class NumericColumnTypeTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Numerics)
+            val results = from(Numerics)
                 .selectAll(Numerics)
                 .execute(this)
 

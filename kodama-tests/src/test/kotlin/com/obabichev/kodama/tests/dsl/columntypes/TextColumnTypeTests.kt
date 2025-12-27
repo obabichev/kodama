@@ -1,6 +1,6 @@
 package com.obabichev.kodama.tests.dsl.columntypes
 
-import com.obabichev.kodama.query.query
+import com.obabichev.kodama.query.*
 import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.tests.schema.generated.*
 import com.obabichev.kodama.tests.infrastructure.DatabaseTest
@@ -32,8 +32,7 @@ class TextColumnTypeTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Product)
+            val results = from(Product)
                 .selectAll(Product)
                 .execute(this)
 
@@ -54,8 +53,7 @@ class TextColumnTypeTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Product)
+            val results = from(Product)
                 .selectAll(Product)
                 .execute(this)
 
@@ -76,8 +74,7 @@ class TextColumnTypeTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Product)
+            val results = from(Product)
                 .selectAll(Product)
                 .execute(this)
 
@@ -101,8 +98,7 @@ class TextColumnTypeTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Product)
+            val results = from(Product)
                 .selectAll(Product)
                 .execute(this)
 
@@ -166,8 +162,7 @@ class TextColumnTypeTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Product)
+            val results = from(Product)
                 .selectAll(Product)
                 .execute(this)
 
@@ -195,8 +190,7 @@ class TextColumnTypeTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Product)
+            val results = from(Product)
                 .selectAll(Product)
                 .execute(this)
 

@@ -11,12 +11,14 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Tests for comparison operators: eq, neq, lt, lte, gt, gte
+ * Tests for comparison operators: eq, neq, lt, lte, gt, gte, between, isNull, isNotNull
  *
  * Verifies:
  * - All comparison operators work with integer values
  * - Operators generate correct SQL
  * - Operators work with different numeric types
+ * - BETWEEN operator for range queries
+ * - NULL check operators
  */
 class ComparisonOperatorTests : DatabaseTest() {
     override fun requiredTables(): List<Table> = listOf(Numerics)
@@ -45,8 +47,7 @@ class ComparisonOperatorTests : DatabaseTest() {
         }
 
         withConnection {
-            val queryBuilder = query()
-                .from(Numerics)
+            val queryBuilder = from(Numerics)
                 .selectAll(Numerics)
                 .where {
                     numerics.intValue eq 100
@@ -89,8 +90,7 @@ class ComparisonOperatorTests : DatabaseTest() {
         }
 
         withConnection {
-            val queryBuilder = query()
-                .from(Numerics)
+            val queryBuilder = from(Numerics)
                 .selectAll(Numerics)
                 .where {
                     numerics.intValue neq 100
@@ -142,8 +142,7 @@ class ComparisonOperatorTests : DatabaseTest() {
         }
 
         withConnection {
-            val queryBuilder = query()
-                .from(Numerics)
+            val queryBuilder = from(Numerics)
                 .selectAll(Numerics)
                 .where {
                     numerics.intValue lt 100
@@ -197,8 +196,7 @@ class ComparisonOperatorTests : DatabaseTest() {
         }
 
         withConnection {
-            val queryBuilder = query()
-                .from(Numerics)
+            val queryBuilder = from(Numerics)
                 .selectAll(Numerics)
                 .where {
                     numerics.intValue lte 100
@@ -252,8 +250,7 @@ class ComparisonOperatorTests : DatabaseTest() {
         }
 
         withConnection {
-            val queryBuilder = query()
-                .from(Numerics)
+            val queryBuilder = from(Numerics)
                 .selectAll(Numerics)
                 .where {
                     numerics.intValue gt 100
@@ -307,8 +304,7 @@ class ComparisonOperatorTests : DatabaseTest() {
         }
 
         withConnection {
-            val queryBuilder = query()
-                .from(Numerics)
+            val queryBuilder = from(Numerics)
                 .selectAll(Numerics)
                 .where {
                     numerics.intValue gte 100
@@ -353,8 +349,7 @@ class ComparisonOperatorTests : DatabaseTest() {
         }
 
         withConnection {
-            val queryBuilder = query()
-                .from(Numerics)
+            val queryBuilder = from(Numerics)
                 .selectAll(Numerics)
                 .where {
                     numerics.bigIntValue gt 6000000000L
@@ -368,6 +363,113 @@ class ComparisonOperatorTests : DatabaseTest() {
                 assertTrue(bigIntValue > 6000000000L, "bigIntValue should be > 6 billion")
             }
             assertEquals(1, count, "Should match one row")
+        }
+    }
+
+    @Test
+    fun testBetweenOperator() {
+        testData {
+            numerics(
+                id = 1,
+                smallIntValue = 10,
+                intValue = 50,
+                bigIntValue = 1000L,
+                decimalValue = BigDecimal("99.99"),
+                realValue = 1.5f,
+                doubleValue = 2.5
+            )
+            numerics(
+                id = 2,
+                smallIntValue = 20,
+                intValue = 100,
+                bigIntValue = 2000L,
+                decimalValue = BigDecimal("199.99"),
+                realValue = 2.5f,
+                doubleValue = 3.5
+            )
+            numerics(
+                id = 3,
+                smallIntValue = 30,
+                intValue = 150,
+                bigIntValue = 3000L,
+                decimalValue = BigDecimal("299.99"),
+                realValue = 3.5f,
+                doubleValue = 4.5
+            )
+            numerics(
+                id = 4,
+                smallIntValue = 40,
+                intValue = 200,
+                bigIntValue = 4000L,
+                decimalValue = BigDecimal("399.99"),
+                realValue = 4.5f,
+                doubleValue = 5.5
+            )
+        }
+
+        withConnection {
+            val queryBuilder = from(Numerics)
+                .selectAll(Numerics)
+                .where {
+                    numerics.intValue.between(75, 175)
+                }
+
+            val sql = queryBuilder.build().sql()
+            println("BETWEEN Test SQL: $sql")
+            assertTrue(sql.contains("BETWEEN"), "SQL should contain BETWEEN keyword")
+
+            val results = queryBuilder.execute(this)
+            val intValues = results.map { it.numerics.intValue as Int }.toList().sorted()
+            assertEquals(2, intValues.size, "Should match two rows (intValue BETWEEN 75 AND 175)")
+            assertEquals(listOf(100, 150), intValues)
+            assertTrue(intValues.all { it in 75..175 }, "All values should be between 75 and 175")
+        }
+    }
+
+    @Test
+    fun testBetweenIncludesBoundaries() {
+        testData {
+            numerics(
+                id = 1,
+                smallIntValue = 10,
+                intValue = 100,
+                bigIntValue = 1000L,
+                decimalValue = BigDecimal("99.99"),
+                realValue = 1.5f,
+                doubleValue = 2.5
+            )
+            numerics(
+                id = 2,
+                smallIntValue = 20,
+                intValue = 150,
+                bigIntValue = 2000L,
+                decimalValue = BigDecimal("199.99"),
+                realValue = 2.5f,
+                doubleValue = 3.5
+            )
+            numerics(
+                id = 3,
+                smallIntValue = 30,
+                intValue = 200,
+                bigIntValue = 3000L,
+                decimalValue = BigDecimal("299.99"),
+                realValue = 3.5f,
+                doubleValue = 4.5
+            )
+        }
+
+        withConnection {
+            val queryBuilder = from(Numerics)
+                .selectAll(Numerics)
+                .where {
+                    numerics.intValue.between(100, 200)
+                }
+
+            val results = queryBuilder.execute(this)
+            val intValues = results.map { it.numerics.intValue as Int }.toList().sorted()
+            // BETWEEN is inclusive on both boundaries
+            assertEquals(3, intValues.size, "Should match all three rows (boundaries included)")
+            assertEquals(listOf(100, 150, 200), intValues)
         }
     }
 }

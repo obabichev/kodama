@@ -1,6 +1,8 @@
 package com.obabichev.kodama.tests.infrastructure
 
 import com.obabichev.kodama.execute.JdbcTransaction
+import com.obabichev.kodama.tests.schema.*
+import com.obabichev.kodama.tests.schema.generated.*
 import java.math.BigDecimal
 
 /**
@@ -24,7 +26,7 @@ import java.math.BigDecimal
 class TestDataBuilder(private val transaction: JdbcTransaction) {
 
     /**
-     * Insert a person record.
+     * Insert a person record using generated insert method.
      *
      * @param name Primary key, must be unique
      * @param age Must be a valid integer
@@ -34,16 +36,12 @@ class TestDataBuilder(private val transaction: JdbcTransaction) {
         name: String,
         age: Int
     ): InsertedPerson {
-        transaction.executeUpdate(
-            "INSERT INTO person (name, age) VALUES (?, ?)",
-            name, age
-        )
+        Person.insert(transaction, name, age)
         return InsertedPerson(name, age)
     }
 
     /**
-     * Insert an order record.
-     * Note: "order" is a SQL reserved keyword, table name is quoted.
+     * Insert an order record using generated insert method.
      *
      * @param id Primary key, must be unique
      * @param userName Foreign key reference to person.name
@@ -57,15 +55,12 @@ class TestDataBuilder(private val transaction: JdbcTransaction) {
         product: String,
         cost: Int
     ): InsertedOrder {
-        transaction.executeUpdate(
-            """INSERT INTO "order" (id, user_name, product, cost) VALUES (?, ?, ?, ?)""",
-            id, userName, product, cost
-        )
+        Order.insert(transaction, id, userName, product, cost)
         return InsertedOrder(id, userName, product, cost)
     }
 
     /**
-     * Insert a profile record.
+     * Insert a profile record using generated insert method.
      *
      * @param userName Reference to person.name
      * @param contact Contact information (email, phone, etc.)
@@ -77,15 +72,12 @@ class TestDataBuilder(private val transaction: JdbcTransaction) {
         contact: String,
         photo: String? = null
     ): InsertedProfile {
-        transaction.executeUpdate(
-            "INSERT INTO profile (user_name, contact, photo) VALUES (?, ?, ?)",
-            userName, contact, photo
-        )
+        Profile.insert(transaction, userName, contact, photo)
         return InsertedProfile(userName, contact, photo)
     }
 
     /**
-     * Insert a company record.
+     * Insert a company record using generated insert method.
      *
      * @param id Primary key, must be unique
      * @param companyName Company name
@@ -95,15 +87,12 @@ class TestDataBuilder(private val transaction: JdbcTransaction) {
         id: Int,
         companyName: String
     ): InsertedCompany {
-        transaction.executeUpdate(
-            "INSERT INTO company (id, company_name) VALUES (?, ?)",
-            id, companyName
-        )
+        Company.insert(transaction, id, companyName)
         return InsertedCompany(id, companyName)
     }
 
     /**
-     * Insert a product record.
+     * Insert a product record using generated insert method.
      *
      * @param id Primary key, must be unique
      * @param name Product name
@@ -119,15 +108,12 @@ class TestDataBuilder(private val transaction: JdbcTransaction) {
         price: Int,
         discount: Int? = null
     ): InsertedProduct {
-        transaction.executeUpdate(
-            "INSERT INTO product (id, name, description, price, discount) VALUES (?, ?, ?, ?, ?)",
-            id, name, description, price, discount
-        )
+        Product.insert(transaction, id, name, description, price, discount)
         return InsertedProduct(id, name, description, price, discount)
     }
 
     /**
-     * Insert a settings record.
+     * Insert a settings record using generated insert method.
      *
      * @param id Primary key, must be unique
      * @param key Settings key/name
@@ -141,15 +127,12 @@ class TestDataBuilder(private val transaction: JdbcTransaction) {
         enabled: Boolean,
         verified: Boolean? = null
     ): InsertedSettings {
-        transaction.executeUpdate(
-            "INSERT INTO settings (id, key, enabled, verified) VALUES (?, ?, ?, ?)",
-            id, key, enabled, verified
-        )
+        Settings.insert(transaction, id, key, enabled, verified)
         return InsertedSettings(id, key, enabled, verified)
     }
 
     /**
-     * Insert a numerics record for testing all numeric column types.
+     * Insert a numerics record using generated insert method.
      *
      * @param id Primary key, must be unique
      * @param smallIntValue SMALLINT value
@@ -179,14 +162,8 @@ class TestDataBuilder(private val transaction: JdbcTransaction) {
         nullableReal: Float? = null,
         nullableDouble: Double? = null
     ): InsertedNumerics {
-        transaction.executeUpdate(
-            """
-            INSERT INTO numerics (
-                id, small_int_value, int_value, big_int_value, decimal_value, real_value, double_value,
-                nullable_small_int, nullable_big_int, nullable_decimal, nullable_real, nullable_double
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """.trimIndent(),
-            id, smallIntValue, intValue, bigIntValue, decimalValue, realValue, doubleValue,
+        Numerics.insert(
+            transaction, id, smallIntValue, intValue, bigIntValue, decimalValue, realValue, doubleValue,
             nullableSmallInt, nullableBigInt, nullableDecimal, nullableReal, nullableDouble
         )
         return InsertedNumerics(
@@ -196,7 +173,7 @@ class TestDataBuilder(private val transaction: JdbcTransaction) {
     }
 
     /**
-     * Insert a trading strategy record.
+     * Insert a trading strategy record using generated insert method.
      *
      * @param id Primary key, must be unique
      * @param strategyName Strategy name
@@ -208,15 +185,12 @@ class TestDataBuilder(private val transaction: JdbcTransaction) {
         strategyName: String,
         description: String? = null
     ): InsertedTradingStrategy {
-        transaction.executeUpdate(
-            "INSERT INTO trading_strategy (id, strategy_name, description) VALUES (?, ?, ?)",
-            id, strategyName, description
-        )
+        TradingStrategy.insert(transaction, id, strategyName, description)
         return InsertedTradingStrategy(id, strategyName, description)
     }
 
     /**
-     * Insert a market data record.
+     * Insert a market data record using generated insert method.
      *
      * @param id Primary key, must be unique
      * @param strategyId Foreign key reference to trading_strategy.id
@@ -230,11 +204,44 @@ class TestDataBuilder(private val transaction: JdbcTransaction) {
         timestamp: String,
         price: Int
     ): InsertedMarketData {
-        transaction.executeUpdate(
-            "INSERT INTO market_data (id, strategy_id, timestamp, price) VALUES (?, ?, ?, ?)",
-            id, strategyId, timestamp, price
-        )
+        MarketData.insert(transaction, id, strategyId, timestamp, price)
         return InsertedMarketData(id, strategyId, timestamp, price)
+    }
+
+    /**
+     * Insert an event record using generated insert method.
+     * Tests all datetime column types.
+     *
+     * @param id Primary key, must be unique
+     * @param eventDate DATE column (LocalDate)
+     * @param eventTime TIME column (LocalTime)
+     * @param createdAt TIMESTAMP column (LocalDateTime)
+     * @param scheduledFor Optional TIMESTAMP column (LocalDateTime?)
+     * @param eventTimestamp TIMESTAMP WITH TIME ZONE column (OffsetDateTime)
+     * @param reminderTime TIME WITH TIME ZONE column (OffsetTime)
+     * @param duration INTERVAL column (Duration)
+     * @param optionalDuration Optional INTERVAL column (Duration?)
+     * @return The inserted event data for reference
+     */
+    fun events(
+        id: Int,
+        eventDate: java.time.LocalDate,
+        eventTime: java.time.LocalTime,
+        createdAt: java.time.LocalDateTime,
+        scheduledFor: java.time.LocalDateTime? = null,
+        eventTimestamp: java.time.OffsetDateTime,
+        reminderTime: java.time.OffsetTime,
+        duration: java.time.Duration,
+        optionalDuration: java.time.Duration? = null
+    ): InsertedEvents {
+        Events.insert(
+            transaction, id, eventDate, eventTime, createdAt, scheduledFor,
+            eventTimestamp, reminderTime, duration, optionalDuration
+        )
+        return InsertedEvents(
+            id, eventDate, eventTime, createdAt, scheduledFor,
+            eventTimestamp, reminderTime, duration, optionalDuration
+        )
     }
 }
 
@@ -244,6 +251,7 @@ class TestDataBuilder(private val transaction: JdbcTransaction) {
  */
 data class InsertedPerson(val name: String, val age: Int)
 data class InsertedOrder(val id: Int, val userName: String, val product: String, val cost: Int)
+data class InsertedBook(val id: Int, val title: String, val content: String, val pages: Int)
 data class InsertedProfile(val userName: String, val contact: String, val photo: String?)
 data class InsertedCompany(val id: Int, val companyName: String)
 data class InsertedProduct(
@@ -253,12 +261,14 @@ data class InsertedProduct(
     val price: Int,
     val discount: Int?
 )
+
 data class InsertedSettings(
     val id: Int,
     val key: String,
     val enabled: Boolean,
     val verified: Boolean?
 )
+
 data class InsertedNumerics(
     val id: Int,
     val smallIntValue: Short,
@@ -273,14 +283,28 @@ data class InsertedNumerics(
     val nullableReal: Float?,
     val nullableDouble: Double?
 )
+
 data class InsertedTradingStrategy(
     val id: Int,
     val strategyName: String,
     val description: String?
 )
+
 data class InsertedMarketData(
     val id: Int,
     val strategyId: Int,
     val timestamp: String,
     val price: Int
+)
+
+data class InsertedEvents(
+    val id: Int,
+    val eventDate: java.time.LocalDate,
+    val eventTime: java.time.LocalTime,
+    val createdAt: java.time.LocalDateTime,
+    val scheduledFor: java.time.LocalDateTime?,
+    val eventTimestamp: java.time.OffsetDateTime,
+    val reminderTime: java.time.OffsetTime,
+    val duration: java.time.Duration,
+    val optionalDuration: java.time.Duration?
 )

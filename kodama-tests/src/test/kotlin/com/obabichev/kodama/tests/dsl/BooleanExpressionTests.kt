@@ -1,11 +1,9 @@
 package com.obabichev.kodama.tests.dsl
 
+import com.obabichev.kodama.query.*
 import com.obabichev.kodama.components.expression.and
 import com.obabichev.kodama.components.expression.not
 import com.obabichev.kodama.components.expression.or
-import com.obabichev.kodama.query.eq
-import com.obabichev.kodama.query.gt
-import com.obabichev.kodama.query.query
 import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.tests.schema.generated.*
 import com.obabichev.kodama.tests.infrastructure.DatabaseTest
@@ -41,8 +39,7 @@ class BooleanExpressionTests : DatabaseTest() {
         }
 
         withConnection {
-            val queryBuilder = query()
-                .from(Person)
+            val queryBuilder = from(Person)
                 .join(Order) { order.userName eq person.name }
                 .selectAll(Person)
                 .selectAll(Order)
@@ -77,8 +74,7 @@ class BooleanExpressionTests : DatabaseTest() {
         }
 
         withConnection {
-            val queryBuilder = query()
-                .from(Person)
+            val queryBuilder = from(Person)
                 .join(Order) { order.userName eq person.name }
                 .selectAll(Person)
                 .selectAll(Order)
@@ -114,8 +110,7 @@ class BooleanExpressionTests : DatabaseTest() {
         }
 
         withConnection {
-            val queryBuilder = query()
-                .from(Person)
+            val queryBuilder = from(Person)
                 .join(Order) { order.userName eq person.name }
                 .selectAll(Person)
                 .selectAll(Order)
@@ -151,8 +146,7 @@ class BooleanExpressionTests : DatabaseTest() {
         }
 
         withConnection {
-            val queryBuilder = query()
-                .from(Person)
+            val queryBuilder = from(Person)
                 .join(Order) { order.userName eq person.name }
                 .selectAll(Person)
                 .selectAll(Order)
@@ -192,8 +186,7 @@ class BooleanExpressionTests : DatabaseTest() {
         }
 
         withConnection {
-            val queryBuilder = query()
-                .from(Person)
+            val queryBuilder = from(Person)
                 .join(Order) { order.userName eq person.name }
                 .selectAll(Person)
                 .selectAll(Order)
@@ -234,8 +227,7 @@ class BooleanExpressionTests : DatabaseTest() {
         }
 
         withConnection {
-            val queryBuilder = query()
-                .from(Person)
+            val queryBuilder = from(Person)
                 .join(Order) { order.userName eq person.name }
                 .selectAll(Person)
                 .selectAll(Order)
@@ -276,8 +268,7 @@ class BooleanExpressionTests : DatabaseTest() {
 
         withConnection {
             // Should match: alice OR (age=30 AND product="Mouse")
-            val queryBuilder = query()
-                .from(Person)
+            val queryBuilder = from(Person)
                 .join(Order) { order.userName eq person.name }
                 .selectAll(Person)
                 .selectAll(Order)
@@ -313,9 +304,8 @@ class BooleanExpressionTests : DatabaseTest() {
         }
 
         withConnection {
-            query()
-                .from(Person)
-                .select_isOld { person.age gt 100 }
+            from(Person)
+                .selectAliased(IsOld) { person.age gt 100 }
                 .execute(this)
         }
     }

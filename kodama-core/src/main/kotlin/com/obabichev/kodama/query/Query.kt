@@ -14,43 +14,47 @@ class Query(
     val relations: RelationsContainer,
     val aggregates: List<AggregateFunction<*>> = emptyList(),
     val groupBy: List<Column<*>> = emptyList(),
-    val selectables: List<Selectable> = emptyList()
+    val selectables: List<Selectable> = emptyList(),
+    val limit: Int? = null,
+    val offset: Int? = null
 ) {
     fun sql(): String {
-        val tableName = from.name
-
         // Build SELECT clause with columns, aggregates, and selectables
         val selectItems = mutableListOf<String>()
 
         // Add regular columns
-        selectItems.addAll(select.map { "\"${it.relation.name}\".${it.name}" })
+        selectItems.addAll(select.map { "\"${it.relation.name}\".\"${it.name}\"" })
 
         // Add aggregate functions (for backward compatibility)
-        selectItems.addAll(aggregates.map { agg ->
-            val funcName = agg.functionName
-            val columnRef = if (agg.column != null) {
-                "\"${agg.column.relation.name}\".${agg.column.name}"
-            } else {
-                "*" // For COUNT(*)
-            }
-            "$funcName($columnRef) AS ${agg.accessorName}"
-        })
+        // Skip if selectables already contains aggregates (avoid duplicates)
+        val hasAggregateSelectables = selectables.any { it is AggregateSelectable }
+        if (!hasAggregateSelectables) {
+            selectItems.addAll(aggregates.map { agg ->
+                val funcName = agg.functionName
+                val columnRef = if (agg.column != null) {
+                    "\"${agg.column.relation.name}\".\"${agg.column.name}\""
+                } else {
+                    "*" // FOR COUNT(*)
+                }
+                "$funcName($columnRef) AS \"${agg.accessorName}\""
+            })
+        }
 
         // Add selectables (expressions, constants, subqueries, etc.)
         selectItems.addAll(selectables.map { selectable ->
             when (selectable) {
                 is ExpressionSelectable -> {
-                    "${selectable.expression.toSql()} AS ${selectable.alias}"
+                    "${selectable.expression.toSql()} AS \"${selectable.alias}\""
                 }
                 is AggregateSelectable -> {
                     val agg = selectable.function
                     val funcName = agg.functionName
                     val columnRef = if (agg.column != null) {
-                        "\"${agg.column.relation.name}\".${agg.column.name}"
+                        "\"${agg.column.relation.name}\".\"${agg.column.name}\""
                     } else {
                         "*"
                     }
-                    "$funcName($columnRef) AS ${selectable.alias}"
+                    "$funcName($columnRef) AS \"${selectable.alias}\""
                 }
                 is ConstantSelectable -> {
                     // Constants don't need to be in SELECT clause - they're computed client-side
@@ -69,8 +73,11 @@ class Query(
 
         val columns = selectItems.joinToString(", ")
 
+        // Generate FROM clause - check if it's a subquery
+        val fromClause = generateFromClause(from)
+
         val baseQuery = buildString {
-            append("SELECT $columns FROM \"$tableName\"")
+            append("SELECT $columns FROM $fromClause")
 
             // Add JOIN clauses
             joins.forEach { join ->
@@ -80,8 +87,12 @@ class Query(
                     com.obabichev.kodama.components.JoinType.RIGHT -> "RIGHT JOIN"
                 }
                 val (leftColumn, rightColumn) = join.condition
-                // Quote table names to handle SQL keywords and qualify column names to avoid ambiguity
-                append(" $joinType \"${join.relation.name}\" ON \"${leftColumn.relation.name}\".${leftColumn.name} = \"${rightColumn.relation.name}\".${rightColumn.name}")
+
+                // Generate join target - check if it's a subquery
+                val joinTarget = generateFromClause(join.relation)
+
+                // Quote both table and column names to handle SQL keywords and case sensitivity
+                append(" $joinType $joinTarget ON \"${leftColumn.relation.name}\".\"${leftColumn.name}\" = \"${rightColumn.relation.name}\".\"${rightColumn.name}\"")
             }
         }
 
@@ -92,22 +103,49 @@ class Query(
         }
 
         val queryWithGroupBy = if (groupBy.isNotEmpty()) {
-            val groupByClause = groupBy.joinToString(", ") { "\"${it.relation.name}\".${it.name}" }
+            val groupByClause = groupBy.joinToString(", ") { "\"${it.relation.name}\".\"${it.name}\"" }
             "$queryWithWhere GROUP BY $groupByClause"
         } else {
             queryWithWhere
         }
 
-        return if (orderBy.isNotEmpty()) {
-            val orderByClause = orderBy.joinToString(", ") { "\"${it.column.relation.name}\".${it.column.name} ${it.direction.toSql()}" }
+        val queryWithOrderBy = if (orderBy.isNotEmpty()) {
+            val orderByClause = orderBy.joinToString(", ") { "\"${it.column.relation.name}\".\"${it.column.name}\" ${it.direction.toSql()}" }
             "$queryWithGroupBy ORDER BY $orderByClause"
         } else {
             queryWithGroupBy
+        }
+
+        // Add LIMIT and OFFSET clauses
+        val queryWithLimit = if (limit != null) {
+            "$queryWithOrderBy LIMIT $limit"
+        } else {
+            queryWithOrderBy
+        }
+
+        return if (offset != null) {
+            "$queryWithLimit OFFSET $offset"
+        } else {
+            queryWithLimit
         }
     }
 
     fun arguments(): List<QueryArgument<*>> {
         val args = mutableListOf<QueryArgument<*>>()
+
+        // Add arguments from FROM subquery
+        val fromTable = com.obabichev.kodama.schema.Tables.findByRelation(from)
+        if (fromTable is SubqueryTable) {
+            args.addAll(fromTable.subquery.arguments())
+        }
+
+        // Add arguments from JOIN subqueries
+        joins.forEach { join ->
+            val joinTable = com.obabichev.kodama.schema.Tables.findByRelation(join.relation)
+            if (joinTable is SubqueryTable) {
+                args.addAll(joinTable.subquery.arguments())
+            }
+        }
 
         // Add arguments from WHERE clause
         whereExpression?.arguments()?.let { args.addAll(it) }
@@ -126,5 +164,21 @@ class Query(
         }
 
         return args
+    }
+
+    /**
+     * Generate FROM/JOIN clause for a relation.
+     * If the relation belongs to a SubqueryTable, generates: (subquery SQL) AS alias
+     * Otherwise, generates: "table_name"
+     */
+    private fun generateFromClause(relation: Relation): String {
+        val table = com.obabichev.kodama.schema.Tables.findByRelation(relation)
+        return if (table is SubqueryTable) {
+            // It's a subquery - wrap the subquery SQL and use the alias
+            "(${table.subquery.sql()}) AS \"${relation.name}\""
+        } else {
+            // Regular table - just quote the name
+            "\"${relation.name}\""
+        }
     }
 }

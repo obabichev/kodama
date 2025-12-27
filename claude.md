@@ -32,6 +32,7 @@ data class Person(...)
 - **Generates type-safe builders** for each combination (Person, Person+Order, Person+Order+Profile)
 - Generated code is in: `build/generated/kodama/com/obabichev/kodama/tests/data/QueryExtensions.kt`
 - Generator task: `generateKodamaExtensions`
+- Scans test files for `from(...).join(...)` patterns
 
 ### 3. No Reflection
 
@@ -68,7 +69,7 @@ Contains: Person, Order, Profile, Company table objects
 
 Key logic:
 - Scans schema files for `object X : Table(...)` patterns
-- Scans test files for `query().from(...).join(...)` patterns
+- Scans test files for `from(...).join(...)` patterns
 - Generates all prefix combinations for multi-join support
 - Outputs to `build/generated/kodama/`
 
@@ -94,6 +95,7 @@ Provides DSL: `integer()`, `varchar()`, `primaryKey()`
 - ✅ Multiple joins (A → B → C)
 - ✅ WHERE clause with `eq` operator
 - ✅ ORDER BY clause with `.asc()` and `.desc()`
+- ✅ LIMIT and OFFSET for pagination
 - ✅ Type-safe results (access only selected columns)
 - ✅ Code generation via Gradle plugin
 - ✅ SQL injection prevention (prepared statements)
@@ -102,8 +104,8 @@ Provides DSL: `integer()`, `varchar()`, `primaryKey()`
 
 ### Aggregates
 - ✅ Aggregate functions: `count()`, `sum()`, `avg()`, `min()`, `max()`
-- ✅ Named aggregate selections: `select_totalRevenue { sum(order.cost) }`
-- ✅ Automatic GROUP BY when mixing columns + aggregates
+- ✅ Named aggregate selections: `selectAliased(TotalRevenue) { sum(order.cost) }`
+- ✅ Explicit GROUP BY with chainable `.groupBy { column }` syntax
 - ✅ Type-safe aggregate result accessors
 
 ### Data Manipulation
@@ -116,7 +118,6 @@ Provides DSL: `integer()`, `varchar()`, `primaryKey()`
 
 - Only `eq` operator (no gt, lt, like, etc.)
 - No AND/OR boolean combinations in WHERE
-- No LIMIT, OFFSET for pagination
 - No HAVING clause for aggregate filtering
 - No UPDATE, DELETE statements
 - Only INNER JOIN (no LEFT/RIGHT/FULL OUTER)
@@ -146,35 +147,28 @@ See `ROADMAP.md` for planned features.
 
 ### Simple Query
 ```kotlin
-query()
-    .from(Person)
-    .select { +person.name }
+from(Person)
+    .select { person.name }
     .where { person.age eq 25 }
 ```
 
 ### Join Query
 ```kotlin
-query()
-    .from(Person)
+from(Person)
     .join(Order) { order.userName eq person.name }
-    .select {
-        +person.name
-        +order.product
-    }
+    .selectAll(Person)
+    .selectAll(Order)
     .where { person.name eq "kodama" }
 ```
 
 ### Multiple Joins
 ```kotlin
-query()
-    .from(Person)
+from(Person)
     .join(Order) { order.userName eq person.name }
     .join(Profile) { profile.userName eq person.name }
-    .select {
-        +person.all()
-        +order.product
-        +profile.contact
-    }
+    .selectAll(Person)
+    .selectAll(Order)
+    .selectAll(Profile)
 ```
 
 ### Execution
@@ -191,9 +185,8 @@ withConnection { transaction ->
 
 ### ORDER BY Query
 ```kotlin
-query()
-    .from(Person)
-    .select { +person.all() }
+from(Person)
+    .selectAll(Person)
     .orderBy {
         person.age.desc()
         person.name.asc()
@@ -202,10 +195,9 @@ query()
 
 ### Aggregate Query
 ```kotlin
-query()
-    .from(Order)
-    .select_totalRevenue { sum(order.cost) }
-    .select_orderCount { count(order.id) }
+from(Order)
+    .selectAliased(TotalRevenue) { sum(order.cost) }
+    .selectAliased(OrderCount) { count(order.id) }
     .execute(transaction)
     .forEach { row ->
         val revenue = row.totalRevenue  // Named accessor!
@@ -241,19 +233,18 @@ Product.insert(
 
 ## Important Design Patterns
 
-### 1. Unary Plus Operator for SELECT
-Use `+` to add columns to SELECT:
+### 1. Select Methods
+Use method chaining for selections:
 ```kotlin
-.select {
-    +person.name    // Single column
-    +person.all()   // All columns from table
-}
+.selectAll(Person)  // Select all columns from a table
+.select { person.name }  // Select specific column - each .select{} returns exactly one column/expression
+.selectAliased(TotalRevenue) { sum(order.cost) }  // Named selection with marker token
 ```
 
 ### 2. Lambda Contexts for Type Safety
 Each clause has a type-safe context:
 - **Join context**: Access to all previously joined tables + new table
-- **Select context**: Access to all tables in query
+- **Select context**: Access to all tables in query - each `.select { }` returns exactly one column/expression
 - **Where context**: Access to all tables in query
 
 ### 3. Result Access Pattern
@@ -318,7 +309,7 @@ Tests use PostgreSQL with test data:
 
 **"0 query combinations"**:
 - Generator can't find queries in test files
-- Ensure queries use `query().from(...).join(...)` pattern
+- Ensure queries use `from(...).join(...)` pattern
 - Check that queries aren't split across variables
 
 **"Generated code doesn't compile"**:
@@ -378,20 +369,26 @@ Generated code is now placed in `{schemaPackage}.generated` instead of hardcoded
 
 ## Current State
 
-- Version: 0.1.0 (Alpha)
+- Version: 0.3.0 (Alpha)
 - **All tests passing** including:
   - QuerySimpleDataClassTests (8 tests)
   - QueryAggregateTests (3 tests)
   - InsertTests (5 tests)
-  - QueryOrderByTests
+  - QueryOrderByTests (6 tests)
+  - QueryLimitOffsetTests (10 tests) ✅ NEW
+  - Entity Layer tests
 - **Completed Features**:
   - ✅ SELECT with type-safe column selection
   - ✅ INNER JOIN with multiple tables
   - ✅ WHERE with eq operator
   - ✅ ORDER BY with asc/desc
+  - ✅ LIMIT and OFFSET for pagination ✅ NEW (v0.3.0)
   - ✅ Aggregate functions (COUNT, SUM, AVG, MIN, MAX)
-  - ✅ Automatic GROUP BY
+  - ✅ Explicit GROUP BY with chainable `.groupBy { column }` syntax
   - ✅ INSERT statements with compile-time validation
   - ✅ Nullable column support
-- **Documentation updated**: README, ROADMAP, getting-started, code-generation
-- **Ready for next features**: LIMIT/OFFSET, HAVING, AND/OR combinations (see ROADMAP.md Phase 4)
+  - ✅ Date/Time column types (DATE, TIME, TIMESTAMP, TIMESTAMPTZ, TIMETZ, INTERVAL)
+  - ✅ Entity Layer with interface-based entities
+  - ✅ One-to-many and many-to-one relationships
+- **Documentation updated**: README, ROADMAP, CLAUDE.md with LIMIT/OFFSET examples
+- **Ready for next features**: AND/OR combinations, comparison operators, HAVING (see ROADMAP.md Phase 5)

@@ -134,9 +134,8 @@ import com.example.myapp.schema.generated.*  // Generated extensions
 import com.obabichev.kodama.query.*
 
 class UserRepository {
-    fun findUserByName(name: String) = query()
-        .from(Users)  // From schema package
-        .select { users.all() }  // Extension from generated package
+    fun findUserByName(name: String) = from(Users)
+        .selectAll(Users)  // From schema package with extension from generated package
         .where { users.name eq name }
 }
 ```

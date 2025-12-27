@@ -7,23 +7,24 @@ import com.obabichev.kodama.components.Relation
 import com.obabichev.kodama.components.TypedColumn
 import com.obabichev.kodama.components.expression.Expression
 import com.obabichev.kodama.schema.Table
+import com.obabichev.kodama.schema.TableSource
 
 /**
  * Marker for selection types
  */
 sealed interface SelectionMarker {
     val columns: List<Column<*>>
-    val table: Table?
+    val table: TableSource?
     val isTableAll: Boolean
     val isAggregate: Boolean
         get() = false
 }
 
 /**
- * Marker for selecting all columns from a table
+ * Marker for selecting all columns from a table or subquery
  */
 data class TableAllSelection(
-    override val table: Table,
+    override val table: TableSource,
     override val columns: List<Column<*>>
 ) : SelectionMarker {
     override val isTableAll: Boolean = true
@@ -180,12 +181,14 @@ class QueryState {
     var _from: Relation? = null
     val _joins: MutableList<Join> = mutableListOf()
     val _selectedColumns: MutableList<Column<*>> = mutableListOf()
-    val _tableAllSelections: MutableSet<Table> = mutableSetOf()
+    val _tableAllSelections: MutableSet<TableSource> = mutableSetOf()
     val _aggregateSelections: MutableList<AggregateFunction<*>> = mutableListOf()
     val _selectables: MutableList<Selectable> = mutableListOf()  // NEW: Unified selection tracking
     val _groupBy: MutableList<Column<*>> = mutableListOf()  // GROUP BY columns
     var whereExpression: Expression? = null
     val _orderBy: MutableList<OrderByClause> = mutableListOf()
+    var _limit: Int? = null
+    var _offset: Int? = null
     val relations = RelationsContainer()
 
     /**
@@ -207,19 +210,7 @@ class QueryState {
     /**
      * Check if a table had .all() selected
      */
-    fun isTableAllSelected(table: Table): Boolean = table in _tableAllSelections
-}
-
-/**
- * Initial query builder - only allows from()
- * Note: from() methods are provided as extensions in test/generated code
- *
- * Generic parameter Sel tracks the selection state at type level:
- * - NoSelection initially (nothing selected yet)
- * - Updated with each select() call to encode what's been selected
- */
-class InitialQueryBuilder<Sel> {
-    val state = QueryState()
+    fun isTableAllSelected(table: TableSource): Boolean = table in _tableAllSelections
 }
 
 /**
@@ -245,15 +236,6 @@ interface AfterFromQueryBuilderBase<Sel> {
         }
         val from = state._from ?: throw IllegalStateException("FROM clause is required.")
 
-        // When mixing columns with aggregates, automatically add selected columns to GROUP BY
-        val groupBy = if (state._aggregateSelections.isNotEmpty() && state._selectedColumns.isNotEmpty()) {
-            // Auto-populate GROUP BY with selected columns
-            state._selectedColumns.toList()
-        } else {
-            // No aggregates, or aggregates-only query (no columns to group by)
-            state._groupBy.toList()
-        }
-
         return Query(
             state._selectedColumns.toList(),
             from,
@@ -262,7 +244,10 @@ interface AfterFromQueryBuilderBase<Sel> {
             state._orderBy.toList(),
             state.relations,
             state._aggregateSelections.toList(),
-            groupBy
+            state._groupBy.toList(),
+            state._selectables.toList(),
+            state._limit,
+            state._offset
         )
     }
 }
@@ -278,8 +263,3 @@ class AfterFromQueryBuilder<Sel>(
     override val state: QueryState
 ) : AfterFromQueryBuilderBase<Sel>
 
-/**
- * Entry point for type-safe queries
- * Starts with NoSelection (no columns selected yet)
- */
-fun query(): InitialQueryBuilder<NoSelection> = InitialQueryBuilder()

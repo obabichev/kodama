@@ -1,9 +1,8 @@
 package com.obabichev.kodama.tests.dsl
 
+import com.obabichev.kodama.query.*
 import com.obabichev.kodama.components.JoinType
 import com.obabichev.kodama.components.expression.and
-import com.obabichev.kodama.query.query
-import com.obabichev.kodama.query.eq
 import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.tests.schema.generated.*
 import com.obabichev.kodama.tests.infrastructure.DatabaseTest
@@ -23,8 +22,7 @@ class QuerySimpleDataClassTests : DatabaseTest() {
             order(1, "kodama", "Laptop", 1000)
         }
 
-        val queryBuilder = query()
-            .from(Person)
+        val queryBuilder = from(Person)
             .join(Order) { order.userName eq person.name }
             .selectAll(Person)
             .where {
@@ -50,8 +48,7 @@ class QuerySimpleDataClassTests : DatabaseTest() {
             person("kodama", age = 1)
         }
 
-        val queryBuilder = query()
-            .from(Person)
+        val queryBuilder = from(Person)
             .selectAll(Person)
             .where {
                 person.name eq "kodama"
@@ -74,8 +71,7 @@ class QuerySimpleDataClassTests : DatabaseTest() {
             order(1, "kodama", "Laptop", 1000)
         }
 
-        val queryBuilder = query()
-            .from(Person)
+        val queryBuilder = from(Person)
             .join(Order) {
                 order.userName eq person.name
             }
@@ -104,8 +100,7 @@ class QuerySimpleDataClassTests : DatabaseTest() {
 
         // Use new .select() API for specific columns - chain them for type safety
         withConnection {
-            val results = query()
-                .from(Person)
+            val results = from(Person)
                 .join(Order) {
                     order.userName eq person.name
                 }
@@ -133,8 +128,7 @@ class QuerySimpleDataClassTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(Person)
+            val results = from(Person)
                 .join(Order, type = JoinType.INNER) {
                     order.userName eq person.name
                 }
@@ -160,8 +154,7 @@ class QuerySimpleDataClassTests : DatabaseTest() {
             order(1, "kodama", "Laptop", 1000)
         }
 
-        val queryBuilder = query()
-            .from(Person)
+        val queryBuilder = from(Person)
             .join(Order) {
                 order.userName eq person.name
             }
@@ -190,8 +183,7 @@ class QuerySimpleDataClassTests : DatabaseTest() {
             profile("kodama", "kodama@example.com", "photo1.jpg")
         }
 
-        val queryBuilder = query()
-            .from(Profile)
+        val queryBuilder = from(Profile)
             .selectAll(Profile)
             .where {
                 profile.userName eq "kodama"
@@ -216,8 +208,7 @@ class QuerySimpleDataClassTests : DatabaseTest() {
             profile("kodama", "kodama@example.com", "photo1.jpg")
         }
 
-        val queryBuilder = query()
-            .from(Person)
+        val queryBuilder = from(Person)
             .join(Order) { order.userName eq person.name }
             .join(Profile) { profile.userName eq person.name }
             .selectAll(Person)

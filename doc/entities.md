@@ -264,9 +264,8 @@ Existing query DSL code continues to work. Entity layer is optional:
 
 ```kotlin
 // Query DSL - still works!
-query()
-    .from(Users)
-    .join(Orders) { orders.userId eq users.id }
+from(Users)
+    .join(UserOrders) { userOrders.userId eq users.id }
     .selectAll(Users)
     .execute(transaction)
 

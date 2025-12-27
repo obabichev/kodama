@@ -1,7 +1,6 @@
 package com.obabichev.kodama.tests.dsl
 
-import com.obabichev.kodama.query.eq
-import com.obabichev.kodama.query.query
+import com.obabichev.kodama.query.*
 import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.tests.infrastructure.DatabaseTest
 import com.obabichev.kodama.tests.schema.TradingStrategy
@@ -28,8 +27,7 @@ class PascalCaseNamingTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(TradingStrategy)
+            val results = from(TradingStrategy)
                 .selectAll(TradingStrategy)
                 .where {
                     tradingStrategy.id eq 1
@@ -52,8 +50,7 @@ class PascalCaseNamingTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(TradingStrategy)
+            val results = from(TradingStrategy)
                 .selectAll(TradingStrategy)
                 .where {
                     tradingStrategy.id eq 2
@@ -77,8 +74,7 @@ class PascalCaseNamingTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(TradingStrategy)
+            val results = from(TradingStrategy)
                 .join(MarketData) {
                     marketData.strategyId eq tradingStrategy.id
                 }
@@ -111,8 +107,7 @@ class PascalCaseNamingTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(TradingStrategy)
+            val results = from(TradingStrategy)
                 .selectAll(TradingStrategy)
                 .where {
                     tradingStrategy.id eq 1
@@ -134,8 +129,7 @@ class PascalCaseNamingTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(TradingStrategy)
+            val results = from(TradingStrategy)
                 .selectAll(TradingStrategy)
                 .where {
                     tradingStrategy.strategyName eq "Momentum Strategy"
@@ -163,12 +157,9 @@ class PascalCaseNamingTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(TradingStrategy)
+            val results = from(TradingStrategy)
                 .selectAll(TradingStrategy)
-                .orderBy {
-                    +tradingStrategy.id.desc()
-                }
+                .orderBy { tradingStrategy.id.desc() }
                 .execute(this)
 
             var count = 0
@@ -198,8 +189,7 @@ class PascalCaseNamingTests : DatabaseTest() {
             assertEquals(1, result.rowsAffected)
 
             // Verify it was inserted
-            val results = query()
-                .from(TradingStrategy)
+            val results = from(TradingStrategy)
                 .selectAll(TradingStrategy)
                 .where {
                     tradingStrategy.id eq 999
@@ -218,8 +208,7 @@ class PascalCaseNamingTests : DatabaseTest() {
         }
 
         withConnection {
-            val results = query()
-                .from(TradingStrategy)
+            val results = from(TradingStrategy)
                 .selectAll(TradingStrategy)
                 .execute(this)
 

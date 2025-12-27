@@ -4,7 +4,9 @@
 [![Kotlin](https://img.shields.io/badge/kotlin-2.2.0+-blue.svg)](https://kotlinlang.org/)
 [![Version](https://img.shields.io/badge/version-0.2.0-orange.svg)]()
 
-**Kodama** (Kotlin Data Mapper) is a type-safe SQL query builder for Kotlin and PostgreSQL. Unlike traditional ORMs, Kodama provides 100% compile-time type safety through code generation, eliminating runtime errors and reflection overhead.
+**Kodama** (Kotlin Data Mapper) is a type-safe SQL query builder for Kotlin and PostgreSQL. Unlike traditional ORMs,
+Kodama provides 100% compile-time type safety through code generation, eliminating runtime errors and reflection
+overhead.
 
 ## ✨ Key Features
 
@@ -44,6 +46,7 @@ dependencies {
 **Note:** `kodama-core` automatically includes the PostgreSQL JDBC driver as a transitive dependency.
 
 **Package Configuration (Optional):**
+
 ```kotlin
 kodama {
     schemaPackage.set("com.yourcompany.yourproject.schema")  // Auto-detected if not specified
@@ -56,6 +59,7 @@ kodama {
 To test Kodama before the Maven Central release, you can publish it locally:
 
 1. Clone and build Kodama:
+
 ```bash
 git clone https://github.com/obabichev/kodama.git
 cd kodama
@@ -63,6 +67,7 @@ cd kodama
 ```
 
 2. In your project's `settings.gradle.kts`, add `mavenLocal()`:
+
 ```kotlin
 pluginManagement {
     repositories {
@@ -81,6 +86,7 @@ dependencyResolutionManagement {
 ```
 
 3. Use Kodama in your `build.gradle.kts`:
+
 ```kotlin
 plugins {
     id("com.obabichev.kodama") version "0.2.0"
@@ -143,11 +149,10 @@ object Users : EntityTable<User>("users") {
 ### Write Type-Safe Queries
 
 ```kotlin
-import com.obabichev.kodama.query.query
+import com.obabichev.kodama.query.from
 import com.obabichev.kodama.query.eq
 
-val queryBuilder = query()
-    .from(Users)
+val queryBuilder = from(Users)
     .join(Orders) { orders.userId eq users.id }
     .selectAll(Users)  // Select all columns from Users table
     .where {
@@ -168,125 +173,169 @@ withConnection { transaction ->
 }
 ```
 
-## Why Kodama?
-
-### The Problem with Traditional ORMs
-
-```kotlin
-// Traditional ORM - compiles but fails at runtime
-val user = query<User>()
-    .select("name", "email")
-    .execute()
-
-println(user.id)  // 💥 Runtime error - id wasn't selected!
-println(user.age) // 💥 Runtime error - type mismatch!
-```
-
-### The Kodama Solution
-
-```kotlin
-// Kodama - errors caught at compile time
-val queryBuilder = query()
-    .from(Users)
-    .selectAll(Users)  // Select all columns
-
-withConnection { transaction ->
-    val results = queryBuilder.execute(transaction)
-    val row = results.first()
-
-    println(row.users.name)   // ✅ Compiles - all columns selected
-    println(row.users.email)  // ✅ Compiles - all columns selected
-    println(row.users.id)     // ✅ Compiles - all columns selected
-    println(row.users.age)    // ✅ Compiles - all columns selected
-}
-```
-
 ## Examples
 
 ### Simple Query
 
 ```kotlin
-query()
-    .from(Users)
+// Select all columns from a table
+from(Users)
     .selectAll(Users)
+    .where { users.age eq 25 }
+
+// Select specific columns (chain .select calls)
+from(Users)
+    .select { users.email }
+    .select { users.age }
     .where { users.age eq 25 }
 ```
 
 **Generates:**
+
 ```sql
-SELECT * FROM users WHERE age = ?
+-- selectAll generates explicit column list (not SELECT *)
+SELECT "users"."id", "users"."email", "users"."age"
+FROM "users"
+WHERE "age" = ?
+
+-- select specific columns
+SELECT "users"."email", "users"."age"
+FROM "users"
+WHERE "age" = ?
 ```
 
 ### Join Query
 
 ```kotlin
-query()
-    .from(Users)
+from(Users)
     .join(Orders) { orders.userId eq users.id }
     .selectAll(Users)
 ```
 
 **Generates:**
+
 ```sql
 SELECT users.id, users.email, users.age
 FROM users
-INNER JOIN orders ON orders.user_id = users.id
+         INNER JOIN orders ON orders.user_id = users.id
 ```
 
 ### Multiple Joins
 
 ```kotlin
-query()
-    .from(Users)
+from(Users)
     .join(Orders) { orders.userId eq users.id }
     .join(Payments) { payments.orderId eq orders.id }
     .selectAll(Orders)
 ```
 
 **Generates:**
+
 ```sql
 SELECT orders.id, orders.user_id, orders.product, orders.cost
 FROM users
-INNER JOIN orders ON orders.user_id = users.id
-INNER JOIN payments ON payments.order_id = orders.id
+         INNER JOIN orders ON orders.user_id = users.id
+         INNER JOIN payments ON payments.order_id = orders.id
 ```
 
 ### ORDER BY
 
 ```kotlin
-query()
-    .from(Users)
+// Single column ORDER BY
+from(Users)
     .selectAll(Users)
-    .orderBy {
-        +users.age.desc()
-        +users.email.asc()
-    }
+    .orderBy { users.age.desc() }
+
+// Multiple columns - chain orderBy calls
+from(Users)
+    .selectAll(Users)
+    .orderBy { users.age.desc() }
+    .orderBy { users.email.asc() }
 ```
 
 **Generates:**
+
 ```sql
-SELECT * FROM users ORDER BY age DESC, email ASC
+SELECT "users"."id", "users"."email", "users"."age"
+FROM "users"
+ORDER BY "age" DESC, "email" ASC
 ```
 
-### Aggregates
+### Pagination (LIMIT / OFFSET)
 
 ```kotlin
-query()
-    .from(Orders)
-    .select_totalRevenue { sum(orders.cost) }
-    .select_orderCount { count(orders.id) }
+// Basic pagination
+from(Users)
+    .selectAll(Users)
+    .orderBy { users.id.asc() }
+    .limit(10)
+    .offset(20)
+
+// Typical pagination pattern
+val page = 2
+val pageSize = 10
+from(Users)
+    .selectAll(Users)
+    .orderBy { users.id.asc() }
+    .limit(pageSize)
+    .offset(page * pageSize)
+    .execute(transaction)
+```
+
+**Generates:**
+
+```sql
+SELECT "users"."id", "users"."email", "users"."age"
+FROM "users"
+ORDER BY "id" ASC
+LIMIT 10 OFFSET 20
+```
+
+### Aggregates with Type Inference
+
+```kotlin
+// Aggregates only - no GROUP BY needed
+from(Orders)
+    .selectAliased(TotalRevenue) { sum(orders.cost) }
+    .selectAliased(OrderCount) { count(orders.id) }
     .execute(transaction)
 
-// Results have type-safe named accessors
+// Results have type-safe named accessors with proper types
 results.forEach { row ->
-    val total: Number = row.totalRevenue  // Named accessor!
-    val count: Number = row.orderCount
+    val total = row.totalRevenue  // Long? - sum() infers Long? type
+    val count = row.orderCount    // Long? - count() infers Long? type
 }
 ```
 
 **Generates:**
+
 ```sql
-SELECT SUM(cost) AS totalRevenue, COUNT(id) AS orderCount FROM orders
+SELECT SUM(cost) AS "total_revenue", COUNT(id) AS "order_count"
+FROM "orders"
+```
+
+**Note:** When selecting only aggregates (no regular columns), GROUP BY is not needed. GROUP BY is only required when mixing regular columns with aggregates.
+
+### Subqueries and Expression Selections
+
+```kotlin
+// Subquery in FROM clause
+fromAliased(UserTotals) {
+    from(Orders)
+        .select { orders.userName }
+        .selectAliased(TotalCost) { sum(orders.cost) }
+}
+    .selectAll(UserTotals)
+    .execute(transaction)
+
+// Boolean expression selection
+from(Users)
+    .selectAliased(IsAdult) { users.age gte 18 }
+    .execute(transaction)
+
+results.forEach { row ->
+    val isAdult: Boolean = row.isAdult  // Properly typed!
+}
 ```
 
 ### INSERT Statements
@@ -315,8 +364,10 @@ Products.insert(
 ```
 
 **Generates:**
+
 ```sql
-INSERT INTO orders (id, user_id, product, cost) VALUES (?, ?, ?, ?)
+INSERT INTO orders (id, user_id, product, cost)
+VALUES (?, ?, ?, ?)
 ```
 
 ### Entity Layer (ORM)
@@ -408,6 +459,7 @@ EntitySession(connection).use { session ->
 ```
 
 **Key Entity Layer Features:**
+
 - **Interface-based entities** - Define contract, get implementation for free
 - **Identity map** - Same ID always returns same instance within session
 - **Convenient API** - `get<Entity>(id)` returns non-null, `find<Entity>(id)` returns nullable
@@ -428,80 +480,9 @@ EntitySession(connection).use { session ->
 - [Query Execution](doc/query-execution.md) - Execute and handle transactions
 - [Code Generation](doc/code-generation.md) - How code generation works
 
-## Philosophy
+## Features
 
-Kodama is built on these core principles:
-
-1. **Type Safety First** - If it compiles, it works
-2. **No Magic** - Everything is explicit and traceable
-3. **Compile-Time Validation** - Catch errors before they reach production
-4. **Zero Reflection** - Use code generation for performance
-5. **Natural Kotlin** - Feels like native Kotlin code
-
-## Comparison
-
-| Feature | Kodama | Exposed | jOOQ | Hibernate |
-|---------|--------|---------|------|-----------|
-| Compile-time safety | ✅ 100% | ⚠️ Partial | ✅ Yes | ❌ No |
-| Reflection-free | ✅ Yes | ❌ No | ✅ Yes | ❌ No |
-| Type-safe results | ✅ Yes | ❌ No | ✅ Yes | ⚠️ Partial |
-| Entity Layer (ORM) | ✅ Yes | ✅ Yes | ❌ No | ✅ Yes |
-| Type-safe relationships | ✅ Yes | ⚠️ Partial | ❌ No | ❌ No |
-| Interface-based entities | ✅ Yes | ❌ No | ❌ No | ❌ No |
-| PostgreSQL focused | ✅ Yes | ❌ No | ⚠️ Multi-DB | ❌ No |
-| Fluent DSL | ✅ Yes | ✅ Yes | ✅ Yes | ⚠️ Limited |
-| Code generation | ✅ Gradle | ❌ No | ✅ Maven/Gradle | ❌ No |
-
-## Current Features
-
-**Version**: 0.2.0 (Alpha)
-
-### DSL Layer (Query Building) ✅
-- **SELECT** - Type-safe column selection
-- **FROM** - Single table queries
-- **INNER JOIN** - Multiple table queries with type-safe conditions
-- **WHERE** - Filter with `eq` operator
-- **ORDER BY** - Sort results with `.asc()` and `.desc()`
-- **Multiple Joins** - Chain joins across 3+ tables
-- **Aggregate Functions** - `count()`, `sum()`, `avg()`, `min()`, `max()`
-- **Named Aggregates** - Type-safe aggregate aliases with method-based selection
-- **GROUP BY** - Automatic GROUP BY for mixed column + aggregate queries
-- **INSERT** - Type-safe inserts with compile-time column validation
-
-### Entity Layer (ORM) ✅
-- **Interface-Based Entities** - Define entities as interfaces, get implementations for free
-- **EntitySession** - Identity map for entity caching and session management
-- **CRUD Operations** - `get()`, `find()`, `save()`, `delete()`, `flush()`
-  - `get<Entity>(id)` - Returns non-null entity or throws exception
-  - `find<Entity>(id)` - Returns nullable entity
-- **One-to-Many Relationships** - Type-safe parent → children navigation
-- **Many-to-One Relationships** - Type-safe child → parent navigation
-- **Bidirectional Relationships** - Navigate both directions with identity map consistency
-- **Context Parameters** - Clean syntax using Kotlin 2.2.0 context parameters
-- **Lazy Loading** - Relationships loaded on-demand
-- **Auto-Generated Implementations** - Internal data classes + factory functions
-
-### Type System ✅
-- **Nullable Columns** - Full support with `Column<T?>` type
-- **Compile-Time Safety** - Only access what you selected
-- **Type-Safe Results** - Result types match selections exactly
-- **Type-Safe Relationships** - Relationship methods declared in interfaces
-
-### In Progress 🚧
-- Many-to-many relationships with junction tables
-- Batch loading (N+1 prevention)
-- Additional WHERE operators (gt, lt, like, isNull, etc.)
-- AND/OR boolean combinations
-- LIMIT and OFFSET
-
-### Planned 📋
-- UPDATE and DELETE statements (DSL layer)
-- LEFT/RIGHT/FULL OUTER JOINs
-- DISTINCT
-- IN operator and subqueries
-- Cascade operations (entity layer)
-- Dirty checking for partial updates
-- Window functions
+For a complete list of features, see the [CHANGELOG](CHANGELOG.md).
 
 ## Requirements
 
@@ -513,6 +494,7 @@ Kodama is built on these core principles:
 ### Dependencies
 
 Kodama requires:
+
 - **kodama-core** - The main library (includes PostgreSQL JDBC driver and SLF4J API)
 - **SLF4J implementation** - A logging backend like Log4j or Logback (you must add this)
 
@@ -525,6 +507,7 @@ Contributions are welcome! Please:
 3. Submit a PR with tests and documentation
 
 **For Maintainers:**
+
 - [Version Update Guide](VERSION_UPDATE.md) - How to update versions for releases
 - [Publishing Guide](doc/publishing.md) - How to publish to Maven Central
 
@@ -555,6 +538,7 @@ cd kodama
 ## Acknowledgments
 
 Inspired by:
+
 - [Exposed](https://github.com/JetBrains/Exposed) - JetBrains' SQL library for Kotlin
 - [jOOQ](https://www.jooq.org/) - Type-safe SQL with code generation
 - [Slick](https://scala-slick.org/) - Scala's functional-relational mapper
