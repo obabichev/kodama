@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import org.gradle.api.publish.maven.tasks.AbstractPublishToMaven
 import java.util.Properties
 
 plugins {
@@ -6,6 +7,7 @@ plugins {
     kotlin("kapt") version "2.1.0"
     `java-gradle-plugin`
     `maven-publish`
+    signing
 }
 
 // Read version and group from parent gradle.properties
@@ -54,12 +56,26 @@ tasks.withType<KotlinCompile>().configureEach {
     }
 }
 
+// Create sources and javadoc JARs (required by Maven Central)
+val sourcesJar by tasks.registering(Jar::class) {
+    archiveClassifier.set("sources")
+    from(sourceSets.main.get().allSource)
+}
+
+val javadocJar by tasks.registering(Jar::class) {
+    archiveClassifier.set("javadoc")
+    // Empty javadoc JAR is acceptable for Maven Central
+}
+
 // Maven publishing configuration
 // Note: The java-gradle-plugin automatically creates publications
 // We just need to configure the POM metadata
 publishing {
     publications {
         withType<MavenPublication> {
+            artifact(sourcesJar)
+            artifact(javadocJar)
+
             pom {
                 name.set("Kodama Gradle Plugin")
                 description.set("Gradle plugin for Kodama - Type-safe SQL query builder code generation")
@@ -95,24 +111,32 @@ publishing {
             url = uri(layout.buildDirectory.dir("repo"))
         }
 
-        // Uncomment for publishing to Maven Central via Sonatype OSSRH
-        // maven {
-        //     name = "OSSRH"
-        //     val releasesRepoUrl = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
-        //     val snapshotsRepoUrl = uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
-        //     url = if (version.toString().endsWith("SNAPSHOT")) snapshotsRepoUrl else releasesRepoUrl
-        //     credentials {
-        //         username = project.findProperty("ossrhUsername") as String? ?: System.getenv("OSSRH_USERNAME")
-        //         password = project.findProperty("ossrhPassword") as String? ?: System.getenv("OSSRH_PASSWORD")
-        //     }
-        // }
+        maven {
+            name = "staging"
+            url = uri(file("../build/maven-staging"))
+        }
+
+        maven {
+            name = "OSSRH"
+            // New Central Portal endpoint (OSSRH was shut down June 30, 2025)
+            val releasesRepoUrl = uri("https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/")
+            val snapshotsRepoUrl = uri("https://ossrh-staging-api.central.sonatype.com/content/repositories/snapshots/")
+            url = if (version.toString().endsWith("SNAPSHOT")) snapshotsRepoUrl else releasesRepoUrl
+            credentials {
+                username = project.findProperty("mavenCentralUsername") as String? ?: System.getenv("MAVEN_CENTRAL_USERNAME")
+                password = project.findProperty("mavenCentralPassword") as String? ?: System.getenv("MAVEN_CENTRAL_PASSWORD")
+            }
+        }
     }
 }
 
-// Optional: Signing configuration for Maven Central
-// Uncomment when ready to publish to Maven Central
-// signing {
-//     publishing.publications.withType<MavenPublication>().configureEach {
-//         sign(this)
-//     }
-// }
+signing {
+    useGpgCmd()
+    // Sign all publications created by java-gradle-plugin
+    sign(publishing.publications)
+}
+
+// Fix task dependencies for Gradle plugin marker publications
+tasks.withType<AbstractPublishToMaven>().configureEach {
+    dependsOn(tasks.withType<Sign>())
+}

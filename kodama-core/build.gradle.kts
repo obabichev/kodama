@@ -5,6 +5,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 plugins {
     kotlin("jvm")
     `maven-publish`
+    signing
 }
 
 repositories {
@@ -35,12 +36,24 @@ tasks.withType<JavaCompile>().configureEach {
     targetCompatibility = "8"
 }
 
+// Create sources and javadoc JARs (required by Maven Central)
+val sourcesJar by tasks.registering(Jar::class) {
+    archiveClassifier.set("sources")
+    from(sourceSets.main.get().allSource)
+}
+
+val javadocJar by tasks.registering(Jar::class) {
+    archiveClassifier.set("javadoc")
+    // Empty javadoc JAR is acceptable for Maven Central
+}
+
 // Maven publishing configuration
 publishing {
     publications {
         create<MavenPublication>("maven") {
             from(components["java"])
-
+            artifact(sourcesJar)
+            artifact(javadocJar)
             artifactId = "kodama-core"
 
             pom {
@@ -74,26 +87,13 @@ publishing {
 
     repositories {
         maven {
-            name = "local"
-            url = uri(layout.buildDirectory.dir("repo"))
+            name = "staging"
+            url = uri(rootProject.layout.buildDirectory.dir("maven-staging"))
         }
-
-        // Uncomment for publishing to Maven Central via Sonatype OSSRH
-        // maven {
-        //     name = "OSSRH"
-        //     val releasesRepoUrl = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
-        //     val snapshotsRepoUrl = uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
-        //     url = if (version.toString().endsWith("SNAPSHOT")) snapshotsRepoUrl else releasesRepoUrl
-        //     credentials {
-        //         username = project.findProperty("ossrhUsername") as String? ?: System.getenv("OSSRH_USERNAME")
-        //         password = project.findProperty("ossrhPassword") as String? ?: System.getenv("OSSRH_PASSWORD")
-        //     }
-        // }
     }
 }
 
-// Optional: Signing configuration for Maven Central
-// Uncomment when ready to publish to Maven Central
-// signing {
-//     sign(publishing.publications["maven"])
-// }
+signing {
+    useGpgCmd()
+    sign(publishing.publications["maven"])
+}
