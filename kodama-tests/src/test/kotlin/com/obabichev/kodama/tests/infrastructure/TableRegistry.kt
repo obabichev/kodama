@@ -1,6 +1,7 @@
 package com.obabichev.kodama.tests.infrastructure
 
 import com.obabichev.kodama.components.Column
+import com.obabichev.kodama.components.types.BigSerialColumnType
 import com.obabichev.kodama.components.types.BooleanColumnType
 import com.obabichev.kodama.components.types.DateColumnType
 import com.obabichev.kodama.components.types.DecimalColumnType
@@ -9,7 +10,9 @@ import com.obabichev.kodama.components.types.FloatColumnType
 import com.obabichev.kodama.components.types.IntColumnType
 import com.obabichev.kodama.components.types.IntervalColumnType
 import com.obabichev.kodama.components.types.LongColumnType
+import com.obabichev.kodama.components.types.SerialColumnType
 import com.obabichev.kodama.components.types.ShortColumnType
+import com.obabichev.kodama.components.types.SmallSerialColumnType
 import com.obabichev.kodama.components.types.StringColumnType
 import com.obabichev.kodama.components.types.TimeColumnType
 import com.obabichev.kodama.components.types.TimeWithTimeZoneColumnType
@@ -37,7 +40,11 @@ object TableRegistry {
         Numerics,
         TradingStrategy,
         MarketData,
-        Events
+        Events,
+        SerialTest,
+        IdentityTest,
+        BigSerialTest,
+        SmallSerialTest
     )
 
     /**
@@ -58,8 +65,9 @@ fun Table.toCreateTableSQL(): String {
     val columnDefinitions = columns.joinToString(",\n    ") { column ->
         val sqlType = column.toSQLType()
         val nullable = if (column.nullable) "" else " NOT NULL"
+        val identity = column.toIdentityModifier()
         val pk = if (column.isPrimaryKey()) " PRIMARY KEY" else ""
-        "${column.sqlName()}$sqlType$nullable$pk"
+        "${column.sqlName()}$sqlType$identity$nullable$pk"
     }
 
     // Handle "order" as a reserved keyword
@@ -77,6 +85,9 @@ fun Table.toCreateTableSQL(): String {
  */
 private fun Column<*>.toSQLType(): String {
     return when (type) {
+        is SmallSerialColumnType -> " SMALLSERIAL"
+        is SerialColumnType -> " SERIAL"
+        is BigSerialColumnType -> " BIGSERIAL"
         is ShortColumnType -> " SMALLINT"
         is IntColumnType -> " INTEGER"
         is LongColumnType -> " BIGINT"
@@ -92,6 +103,24 @@ private fun Column<*>.toSQLType(): String {
         is TimeWithTimeZoneColumnType -> " TIMETZ"
         is IntervalColumnType -> " INTERVAL"
         else -> throw IllegalArgumentException("Unsupported column type: ${type::class.simpleName}")
+    }
+}
+
+/**
+ * Get IDENTITY modifier for columns with GENERATED ALWAYS AS IDENTITY.
+ * Only returns the modifier for non-SERIAL columns with AlwaysGenerated strategy.
+ */
+private fun Column<*>.toIdentityModifier(): String {
+    // SERIAL types already include auto-increment, don't add IDENTITY
+    if (type is SerialColumnType || type is BigSerialColumnType || type is SmallSerialColumnType) {
+        return ""
+    }
+
+    // For other types, check if it's marked as AlwaysGenerated (via .identity())
+    return if (generationStrategy == com.obabichev.kodama.schema.GenerationStrategy.AlwaysGenerated) {
+        " GENERATED ALWAYS AS IDENTITY"
+    } else {
+        ""
     }
 }
 

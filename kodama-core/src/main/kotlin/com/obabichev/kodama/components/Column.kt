@@ -1,5 +1,6 @@
 package com.obabichev.kodama.components
 
+import com.obabichev.kodama.schema.GenerationStrategy
 
 /**
  * Represents a database column.
@@ -10,7 +11,8 @@ open class Column<T>(
     val name: String,
     val relation: Relation,
     val type: ColumnType<T>,
-    val nullable: Boolean = true  // Default to nullable for safety
+    val nullable: Boolean = true,  // Default to nullable for safety
+    val generationStrategy: GenerationStrategy = GenerationStrategy.ClientProvided
 ) {
 }
 

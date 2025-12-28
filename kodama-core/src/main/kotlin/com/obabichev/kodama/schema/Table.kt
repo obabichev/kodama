@@ -3,6 +3,7 @@ package com.obabichev.kodama.schema
 import com.obabichev.kodama.components.Column
 import com.obabichev.kodama.components.ColumnType
 import com.obabichev.kodama.components.Relation
+import com.obabichev.kodama.components.types.BigSerialColumnType
 import com.obabichev.kodama.components.types.BooleanColumnType
 import com.obabichev.kodama.components.types.DateColumnType
 import com.obabichev.kodama.components.types.DecimalColumnType
@@ -11,7 +12,9 @@ import com.obabichev.kodama.components.types.FloatColumnType
 import com.obabichev.kodama.components.types.IntColumnType
 import com.obabichev.kodama.components.types.IntervalColumnType
 import com.obabichev.kodama.components.types.LongColumnType
+import com.obabichev.kodama.components.types.SerialColumnType
 import com.obabichev.kodama.components.types.ShortColumnType
+import com.obabichev.kodama.components.types.SmallSerialColumnType
 import com.obabichev.kodama.components.types.StringColumnType
 import com.obabichev.kodama.components.types.TimeColumnType
 import com.obabichev.kodama.components.types.TimeWithTimeZoneColumnType
@@ -102,6 +105,102 @@ abstract class Table(tableName: String) : TableSource {
      */
     protected fun bigint(columnName: String): Column<Long> {
         val column = Column(columnName, relation, LongColumnType, nullable = false)
+        relation.registerColumn(column)
+        return column
+    }
+
+    /**
+     * Define a SERIAL column (PostgreSQL auto-incrementing INTEGER).
+     *
+     * SERIAL is a PostgreSQL-specific type that creates an auto-incrementing integer column.
+     * Values are generated automatically by the database and should NOT be provided during INSERT.
+     *
+     * Columns defined with serial() are excluded from generated insert() method parameters.
+     *
+     * SQL Type: SERIAL (internally INTEGER with sequence)
+     * Kotlin Type: Int
+     * Range: -2,147,483,648 to 2,147,483,647
+     *
+     * Example:
+     * ```kotlin
+     * object Users : Table("users") {
+     *     val id = serial("id").primaryKey()
+     *     val name = varchar("name", 255)
+     * }
+     * ```
+     */
+    protected fun serial(columnName: String): Column<Int> {
+        val column = Column(
+            columnName,
+            relation,
+            SerialColumnType,
+            nullable = false,
+            generationStrategy = GenerationStrategy.AlwaysGenerated
+        )
+        relation.registerColumn(column)
+        return column
+    }
+
+    /**
+     * Define a BIGSERIAL column (PostgreSQL auto-incrementing BIGINT).
+     *
+     * BIGSERIAL is a PostgreSQL-specific type that creates an auto-incrementing big integer column.
+     * Use this instead of SERIAL when you need larger ID ranges.
+     *
+     * Columns defined with bigserial() are excluded from generated insert() method parameters.
+     *
+     * SQL Type: BIGSERIAL (internally BIGINT with sequence)
+     * Kotlin Type: Long
+     * Range: -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
+     *
+     * Example:
+     * ```kotlin
+     * object Orders : Table("orders") {
+     *     val id = bigserial("id").primaryKey()
+     *     val total = decimal("total", 10, 2)
+     * }
+     * ```
+     */
+    protected fun bigserial(columnName: String): Column<Long> {
+        val column = Column(
+            columnName,
+            relation,
+            BigSerialColumnType,
+            nullable = false,
+            generationStrategy = GenerationStrategy.AlwaysGenerated
+        )
+        relation.registerColumn(column)
+        return column
+    }
+
+    /**
+     * Define a SMALLSERIAL column (PostgreSQL auto-incrementing SMALLINT).
+     *
+     * SMALLSERIAL is a PostgreSQL-specific type that creates an auto-incrementing small integer column.
+     * Use this for small ID ranges when storage space is a concern.
+     *
+     * Columns defined with smallserial() are excluded from generated insert() method parameters.
+     *
+     * SQL Type: SMALLSERIAL (internally SMALLINT with sequence)
+     * Kotlin Type: Short
+     * Range: -32,768 to 32,767
+     *
+     * Example:
+     * ```kotlin
+     * object Tags : Table("tags") {
+     *     val id = smallserial("id").primaryKey()
+     *     val name = varchar("name", 50)
+     * }
+     * ```
+     */
+    protected fun smallserial(columnName: String): Column<Short> {
+        val column = Column(
+            columnName,
+            relation,
+            SmallSerialColumnType,
+            nullable = false,
+            generationStrategy = GenerationStrategy.AlwaysGenerated
+        )
         relation.registerColumn(column)
         return column
     }

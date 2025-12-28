@@ -5,7 +5,48 @@ All notable changes to Kodama will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - TBD (First Release)
+## [0.3.0] - TBD
+
+### Added
+
+- **Auto-increment column support** - SERIAL and IDENTITY columns for database-generated IDs
+  - **SERIAL types** (PostgreSQL-specific):
+    - `serial("id")` → `SERIAL` (Int, auto-increment from 1)
+    - `bigserial("id")` → `BIGSERIAL` (Long, for large IDs)
+    - `smallserial("id")` → `SMALLSERIAL` (Short, for small IDs)
+  - **IDENTITY modifier** (SQL standard):
+    - `integer("id").identity()` → `INTEGER GENERATED ALWAYS AS IDENTITY`
+    - `bigint("id").identity()` → `BIGINT GENERATED ALWAYS AS IDENTITY`
+    - `smallint("id").identity()` → `SMALLINT GENERATED ALWAYS AS IDENTITY`
+  - Auto-generated columns are automatically excluded from `insert()` method parameters
+  - Generated IDs are returned in `InsertResult.generatedKeys` map
+  - Example:
+    ```kotlin
+    object Users : Table("users") {
+        val id = serial("id").primaryKey()  // or: integer("id").identity().primaryKey()
+        val name = varchar("name", 255)
+    }
+
+    val result = Users.insert(transaction, name = "Alice")  // id parameter excluded!
+    val generatedId = result.generatedKeys["id"] as Int
+    ```
+
+### Changed
+
+- **Simplified Query API** - Queries now start directly with `from()` instead of `query().from()`
+  - Old API: `query().from(Person).select { ... }`
+  - New API: `from(Person).select { ... }`
+  - Cleaner, more intuitive API with less boilerplate
+  - Closer to SQL syntax where FROM is the first meaningful clause
+  - All generated `from()` and `fromAliased()` functions are now top-level functions
+
+### Fixed
+
+*(Bug fixes will be documented here during 0.3.0 development)*
+
+---
+
+## [0.2.0] - 2025-12-28 (First Release)
 
 ### Added
 
