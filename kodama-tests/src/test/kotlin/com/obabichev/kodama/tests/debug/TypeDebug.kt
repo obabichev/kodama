@@ -10,11 +10,11 @@ fun debugTypes() {
     val step1 = from(Order)
     val step1Type: AfterFromQueryBuilder_Order<NoColumnsSelected, NoSelections> = step1
 
-    // Step 2: selectAliased with TotalRevenue marker
-    val step2 = step1.selectAliased(TotalRevenue) { sum(order.cost) }
-    val step2Type: AfterFromQueryBuilder_Order<NoColumnsSelected, SelectionSet_TotalRevenue> = step2
+    // Step 2: selectAs with TotalRevenue marker
+    val step2 = step1.selectAs(TotalRevenue) { sum(order.cost) }
+    val step2Type: AfterFromQueryBuilder_Order<NoColumnsSelected, SelectionSet_totalRevenue> = step2
 
     // Step 3: execute - what do we get?
     val step3 = step2.execute(null!!)
-    val step3Type: SelectionResult_TotalRevenue = step3.first()
+    val step3Type: SelectionResult_totalRevenue = step3.first()
 }

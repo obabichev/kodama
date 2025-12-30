@@ -31,7 +31,7 @@ class ExpressionSelectionTests : DatabaseTest() {
 
         withConnection {
             val results = from(Person)
-                .selectAliased(IsOld) { person.age gt 30 }
+                .selectAs(IsOld) { person.age gt 30 }
                 .execute(this)
 
             val resultList = results.toList()
@@ -53,7 +53,7 @@ class ExpressionSelectionTests : DatabaseTest() {
         // Test IsYoung separately
         withConnection {
             val youngResults = from(Person)
-                .selectAliased(IsYoung) { person.age lt 30 }
+                .selectAs(IsYoung) { person.age lt 30 }
                 .execute(this)
 
             val youngList = youngResults.toList()
@@ -70,7 +70,7 @@ class ExpressionSelectionTests : DatabaseTest() {
         // Test IsAdult separately
         withConnection {
             val adultResults = from(Person)
-                .selectAliased(IsAdult) { person.age gte 18 }
+                .selectAs(IsAdult) { person.age gte 18 }
                 .execute(this)
 
             val adultList = adultResults.toList()
@@ -94,7 +94,7 @@ class ExpressionSelectionTests : DatabaseTest() {
 
         withConnection {
             val results = from(Person)
-                .selectAliased(InRange) { (person.age gte 25) and (person.age lte 30) }
+                .selectAs(InRange) { (person.age gte 25) and (person.age lte 30) }
                 .execute(this)
 
             val resultList = results.toList()
@@ -112,7 +112,7 @@ class ExpressionSelectionTests : DatabaseTest() {
 
         withConnection {
             val results = from(Person)
-                .selectAliased(IsThirty) { person.age eq 30 }
+                .selectAs(IsThirty) { person.age eq 30 }
                 .execute(this)
 
             val resultList = results.toList()
@@ -133,7 +133,7 @@ class ExpressionSelectionTests : DatabaseTest() {
 
         withConnection {
             val results = from(Person)
-                .selectAliased(NotThirty) { person.age neq 30 }
+                .selectAs(NotThirty) { person.age neq 30 }
                 .execute(this)
 
             val resultList = results.toList()

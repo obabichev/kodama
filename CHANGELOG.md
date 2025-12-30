@@ -5,6 +5,36 @@ All notable changes to Kodama will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Unified marker-based selection API** - `.selectAs()` now works for all selection types
+  - Replaced separate `.selectAliased()` API with unified `.selectAs()` method
+  - Single API for columns: `.selectAs(PersonName) { person.name }`
+  - Single API for aggregates: `.selectAs(TotalRevenue) { sum(order.cost) }`
+  - Single API for expressions: `.selectAs(IsAdult) { person.age gte 18 }`
+  - Type-safe result accessors with consistent naming
+  - **Breaking change**: Existing `.selectAliased()` usages must be updated to `.selectAs()`
+
+### Removed
+
+- **`.select { }` API for individual columns** - Use `.selectAs()` instead
+  - Old API created inconsistent access patterns when mixed with marker-based selections
+  - Migration:
+    ```kotlin
+    // ❌ Old: Inconsistent access
+    from(Order)
+        .select { order.userName }      // Accessed via row.resultSet.getString(1) or row.order.userName
+        .selectAs(Count) { count(...) } // Accessed via row.count
+
+    // ✅ New: Consistent named accessors
+    from(Order)
+        .selectAs(UserName) { order.userName } // Accessed via row.userName
+        .selectAs(Count) { count(...) }         // Accessed via row.count
+    ```
+  - **Note**: `.selectAll(Table)` remains available for selecting all columns from a table
+
 ## [0.3.0] - TBD
 
 ### Added

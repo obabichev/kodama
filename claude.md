@@ -102,11 +102,13 @@ Provides DSL: `integer()`, `varchar()`, `primaryKey()`
 - ✅ Column types: `integer()`, `varchar(length)`
 - ✅ Nullable columns with `.nullable()` marker
 
-### Aggregates
+### Marker-Based Selections
+- ✅ Unified `.selectAs()` API for columns, aggregates, and expressions
 - ✅ Aggregate functions: `count()`, `sum()`, `avg()`, `min()`, `max()`
-- ✅ Named aggregate selections: `selectAliased(TotalRevenue) { sum(order.cost) }`
+- ✅ Column selections: `selectAs(PersonName) { person.name }`
+- ✅ Expression selections: `selectAs(IsAdult) { person.age gte 18 }`
 - ✅ Explicit GROUP BY with chainable `.groupBy { column }` syntax
-- ✅ Type-safe aggregate result accessors
+- ✅ Type-safe result accessors with proper type inference
 
 ### Data Manipulation
 - ✅ INSERT statements with compile-time column validation
@@ -148,7 +150,7 @@ See `ROADMAP.md` for planned features.
 ### Simple Query
 ```kotlin
 from(Person)
-    .select { person.name }
+    .selectAs(PersonName) { person.name }
     .where { person.age eq 25 }
 ```
 
@@ -196,8 +198,8 @@ from(Person)
 ### Aggregate Query
 ```kotlin
 from(Order)
-    .selectAliased(TotalRevenue) { sum(order.cost) }
-    .selectAliased(OrderCount) { count(order.id) }
+    .selectAs(TotalRevenue) { sum(order.cost) }
+    .selectAs(OrderCount) { count(order.id) }
     .execute(transaction)
     .forEach { row ->
         val revenue = row.totalRevenue  // Named accessor!
@@ -237,14 +239,23 @@ Product.insert(
 Use method chaining for selections:
 ```kotlin
 .selectAll(Person)  // Select all columns from a table
-.select { person.name }  // Select specific column - each .select{} returns exactly one column/expression
-.selectAliased(TotalRevenue) { sum(order.cost) }  // Named selection with marker token
+.selectAs(PersonName) { person.name }  // Select individual column with named accessor
+.selectAs(TotalRevenue) { sum(order.cost) }  // Select aggregate with named accessor
+.selectAs(IsAdult) { person.age gte 18 }  // Select expression with named accessor
 ```
+
+**Unified `.selectAs()` API:**
+- Works for columns: `.selectAs(PersonName) { person.name }` → `row.personName`
+- Works for aggregates: `.selectAs(TotalRevenue) { sum(order.cost) }` → `row.totalRevenue`
+- Works for expressions: `.selectAs(IsAdult) { person.age gte 18 }` → `row.isAdult`
+- Type inference from marker interface and expression type
+- Generates consistent named accessors for all selections
+- **Note**: The old `.select { }` API for individual columns has been removed
 
 ### 2. Lambda Contexts for Type Safety
 Each clause has a type-safe context:
 - **Join context**: Access to all previously joined tables + new table
-- **Select context**: Access to all tables in query - each `.select { }` returns exactly one column/expression
+- **Select context**: Access to all tables in query - each `.selectAs { }` returns exactly one column/expression
 - **Where context**: Access to all tables in query
 
 ### 3. Result Access Pattern

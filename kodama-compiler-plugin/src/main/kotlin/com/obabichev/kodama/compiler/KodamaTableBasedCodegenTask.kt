@@ -321,6 +321,17 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                 val expressionCode = match.groupValues[2]
                 markerTypes[markerName] = inferExpressionType(expressionCode)
             }
+
+            // Find column selections with markers: .selectAs(MarkerType) { column }
+            val selectAsPattern = """\.selectAs\(([A-Z]\w+)\)\s*\{\s*([^}]*?)\s*\}""".toRegex()
+            selectAsPattern.findAll(content).forEach { match ->
+                val markerName = match.groupValues[1]
+                val columnCode = match.groupValues[2].trim()
+                // Track that this marker was used (generator will create the marker interface)
+                usedColumnMarkers.add(markerName)
+                // Infer type from column expression
+                markerTypes[markerName] = inferExpressionType(columnCode)
+            }
         }
 
         // NOW: Scan test files for subquery patterns
@@ -448,7 +459,29 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                 } else if (expressionBody.contains("countAll()")) {
                     Pair("Long", false)
                 } else {
-                    Pair("Number", true)
+                    // Try to match simple column reference like "order.userName"
+                    val columnRefPattern = """(\w+)\.(\w+)""".toRegex()
+                    val colMatch = columnRefPattern.find(expressionBody)
+
+                    if (colMatch != null) {
+                        val tableRef = colMatch.groupValues[1]
+                        val columnName = colMatch.groupValues[2]
+                        val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef
+
+                        // Look up actual column type from table definition
+                        val columnTypes = tableToPropertyTypes[tableName] ?: emptyMap()
+                        val sourceType = columnTypes[columnName] ?: "String"
+
+                        // Check if source column is nullable
+                        val columnNullability = tableToPropertyNullability[tableName] ?: emptyMap()
+                        val sourceIsNullable = columnNullability[columnName] ?: false
+
+                        // Subquery columns are nullable for LEFT JOIN safety
+                        Pair(sourceType, true)
+                    } else {
+                        // Fallback for unknown expressions
+                        Pair("Number", true)
+                    }
                 }
 
                 columns.add(SubqueryColumnInfo(aggregateName, sqlAggregateAlias, kotlinType, isNullable))
@@ -499,16 +532,38 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                 } else if (expressionBody.contains("countAll()")) {
                     Pair("Long", false)
                 } else {
-                    Pair("Number", true)
+                    // Try to match simple column reference like "order.userName"
+                    val columnRefPattern = """(\w+)\.(\w+)""".toRegex()
+                    val colMatch = columnRefPattern.find(expressionBody)
+
+                    if (colMatch != null) {
+                        val tableRef = colMatch.groupValues[1]
+                        val columnName = colMatch.groupValues[2]
+                        val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef
+
+                        // Look up actual column type from table definition
+                        val columnTypes = tableToPropertyTypes[tableName] ?: emptyMap()
+                        val sourceType = columnTypes[columnName] ?: "String"
+
+                        // Check if source column is nullable
+                        val columnNullability = tableToPropertyNullability[tableName] ?: emptyMap()
+                        val sourceIsNullable = columnNullability[columnName] ?: false
+
+                        // Subquery columns are nullable for LEFT JOIN safety
+                        Pair(sourceType, true)
+                    } else {
+                        // Fallback for unknown expressions
+                        Pair("Number", true)
+                    }
                 }
 
                 // Mark as marker-based so we don't generate phantom type interface
                 columns.add(SubqueryColumnInfo(propertyName, sqlAlias, kotlinType, isNullable, isMarkerBased = true))
             }
 
-            // Look for .selectAliased(MarkerName) { ... } patterns (NEW token parameter syntax)
-            val selectAliasedNewPattern = """\.selectAliased\(([A-Z]\w+)\)\s*\{([^}]+)\}""".toRegex()
-            selectAliasedNewPattern.findAll(subqueryBody).forEach { aliasMatch ->
+            // Look for .selectAs(MarkerName) { ... } patterns (unified marker-based API)
+            val selectAsPattern = """\.selectAs\(([A-Z]\w+)\)\s*\{([^}]+)\}""".toRegex()
+            selectAsPattern.findAll(subqueryBody).forEach { aliasMatch ->
                 val markerName = aliasMatch.groupValues[1]  // PascalCase marker like "MyAlias"
                 val expressionBody = aliasMatch.groupValues[2].trim()  // Expression inside lambda
 
@@ -551,8 +606,29 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     // countAll() is nullable for LEFT JOIN safety
                     Pair("Long", true)
                 } else {
-                    // Fallback for unknown expressions - nullable for safety
-                    Pair("Long", true)
+                    // Try to match simple column reference like "order.userName"
+                    val columnRefPattern = """(\w+)\.(\w+)""".toRegex()
+                    val colMatch = columnRefPattern.find(expressionBody)
+
+                    if (colMatch != null) {
+                        val tableRef = colMatch.groupValues[1]
+                        val columnName = colMatch.groupValues[2]
+                        val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef
+
+                        // Look up actual column type from table definition
+                        val columnTypes = tableToPropertyTypes[tableName] ?: emptyMap()
+                        val sourceType = columnTypes[columnName] ?: "String"
+
+                        // Check if source column is nullable
+                        val columnNullability = tableToPropertyNullability[tableName] ?: emptyMap()
+                        val sourceIsNullable = columnNullability[columnName] ?: false
+
+                        // Subquery columns are always nullable for LEFT JOIN safety
+                        Pair(sourceType, true)
+                    } else {
+                        // Fallback for unknown expressions - nullable for safety
+                        Pair("Long", true)
+                    }
                 }
 
                 // Mark as marker-based so we don't generate phantom type interface
@@ -746,7 +822,8 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
         // NEW: Discover selection patterns using pluggable scanners
         val scanners = listOf<SelectionPatternScanner>(
-            AggregateScanner()
+            AggregateScanner(),
+            MarkerBasedSelectionScanner()
             // Easy to add more: ConstantScanner(), SubqueryScanner(), WindowFunctionScanner()
         )
 
@@ -1119,6 +1196,26 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     selectionsWithPos.add(SelectionWithPosition(position, "$tableName:All"))
                 }
 
+                // 5. Handle .selectAs(MarkerName) { column } patterns for named column selections
+                val selectAsPattern = """\.selectAs\(([A-Z]\w+)\)\s*\{\s*(\w+)\.(\w+)\s*\}""".toRegex()
+                selectAsPattern.findAll(queryChain).forEach { match ->
+                    val position = match.range.first
+                    val markerName = match.groupValues[1]  // e.g., "OrgId"
+                    val tableRef = match.groupValues[2]    // e.g., "org"
+                    val columnName = match.groupValues[3]  // e.g., "id"
+
+                    // Resolve table name
+                    val tableName = if (subqueryVarMap.containsKey(tableRef)) {
+                        subqueryVarMap[tableRef]!!
+                    } else {
+                        tableNameMap[tableRef.lowercase()] ?: tableRef
+                    }
+
+                    // Track this as a marker-based column selection
+                    // Format: "col:markerName" to distinguish from regular selections
+                    selectionsWithPos.add(SelectionWithPosition(position, "col:$markerName"))
+                }
+
                 // Sort by position and extract unique selections in order
                 val selections = selectionsWithPos
                     .sortedBy { it.position }
@@ -1213,6 +1310,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
             }
             appendLine()
 
+
             // Generate column name marker interfaces (reusable across tables)
             val allColumnNames = mutableSetOf<String>()
 
@@ -1251,13 +1349,13 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
             // Generate selection marker interfaces (for .aliasAs<T>() usage)
             val generatedMarkers = activeMarkers.filter { it.packageName == genPkg }
             if (generatedMarkers.isNotEmpty()) {
-                appendLine("// Selection marker interfaces for aliased selections")
+                appendLine("// Selection marker interfaces for marker-based selections")
                 appendLine("// These marker interfaces have companion objects that implement the interface")
-                appendLine("// Usage: .selectAliased(OrderCount) { count(order.id) }")
+                appendLine("// Usage: .selectAs(OrderCount) { count(order.id) }")
                 generatedMarkers.sortedBy { it.interfaceName }.forEach { marker ->
                     appendLine("/**")
-                    appendLine(" * Marker interface for aliased selections")
-                    appendLine(" * Use companion object as parameter: .selectAliased(${marker.interfaceName}) { expr }")
+                    appendLine(" * Marker interface for marker-based selections")
+                    appendLine(" * Use companion object as parameter: .selectAs(${marker.interfaceName}) { expr }")
                     appendLine(" * Type parameter T represents the expression result type: ${marker.resultType}")
                     appendLine(" */")
                     appendLine("interface ${marker.interfaceName}<out T> {")
@@ -1530,7 +1628,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     // Add build() method
                     appendLine("    override fun build(): com.obabichev.kodama.query.Query {")
                     appendLine("        if (state._selectedColumns.isEmpty() && state._aggregateSelections.isEmpty() && state._selectables.isEmpty()) {")
-                    appendLine("            error(\"No columns selected. Use .select() or .selectAll() to specify columns to retrieve.\")")
+                    appendLine("            error(\"No columns selected. Use .selectAs() or .selectAll() to specify columns to retrieve.\")")
                     appendLine("        }")
                     appendLine("        val from = state._from ?: error(\"FROM clause is required.\")")
                     appendLine()
@@ -1684,8 +1782,8 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     // Generate new token parameter API: .fromAliased(MarkerType) { query() }
                     appendLine("/**")
                     appendLine(" * Start a query with aliased subquery ${subqueryInfo.name} in FROM clause")
-                    appendLine(" * New API with marker token parameter (consistent with .selectAliased)")
-                    appendLine(" * Usage: fromAliased(${subqueryInfo.name}) { from(Order).select(...) }")
+                    appendLine(" * New API with marker token parameter (consistent with .selectAs)")
+                    appendLine(" * Usage: fromAliased(${subqueryInfo.name}) { from(Order).selectAs(...) { ... } }")
                     appendLine(" */")
                     appendLine("inline fun fromAliased(")
                     appendLine("    marker: ${subqueryInfo.name},")
@@ -1707,7 +1805,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     appendLine(" * Usage:")
                     appendLine(" * ```")
                     appendLine(" * from_${subqueryInfo.name} {")
-                    appendLine(" *     from(...).select(...).build()")
+                    appendLine(" *     from(...).selectAs(...) { ... }.build()")
                     appendLine(" * }")
                     appendLine(" * .selectAll(${subqueryInfo.name})")
                     appendLine(" * ```")
@@ -1929,7 +2027,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
                     if (isSubquery(tableName)) {
                         // For subqueries, generate fromAliased() top-level function that accepts the marker interface
-                        // This allows: val subquery = from(Order).select(...).aliasAs<UserTotalSubquery>()
+                        // This allows: val subquery = from(Order).selectAs(...) { ... }.aliasAs<UserTotalSubquery>()
                         //              val results = fromAliased(subquery).selectAll(...)
                         // The marker interface parameter works because SubqueryTable_XXX implements the marker
                         appendLine("fun fromAliased(subquery: $capitalizedName): $builderClassName<com.obabichev.kodama.query.NoColumnsSelected, NoSelections> {")
@@ -2060,7 +2158,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                                 appendLine(" * ```")
                                 appendLine(" * from(...)")
                                 appendLine(" *     .join_$newTableCapitalized {")
-                                appendLine(" *         from(...).select(...).build()")
+                                appendLine(" *         from(...).selectAs(...) { ... }.build()")
                                 appendLine(" *     }")
                                 appendLine(" *     .selectAll { $camelCaseName }")
                                 appendLine(" * ```")
@@ -2089,7 +2187,7 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                                 appendLine(" * ```")
                                 appendLine(" * from(...)")
                                 appendLine(" *     .leftJoin_$newTableCapitalized(")
-                                appendLine(" *         builder = { from(...).select(...).build() },")
+                                appendLine(" *         builder = { from(...).selectAs(...) { ... }.build() },")
                                 appendLine(" *         condition = { table.$camelCaseName eq $camelCaseName.someColumn }")
                                 appendLine(" *     )")
                                 appendLine(" *     .selectAll { $camelCaseName }")
@@ -2132,8 +2230,8 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                 appendLine("}")
                 appendLine()
 
-                // Generate per-table select methods with lambda-based API
-                // New API: .select { person.name } instead of .select(Person.Name)
+                // Generate per-table marker-based selection API
+                // Use .selectAs(PersonName) { person.name } for type-safe named accessors
                 combination.forEachIndexed { tableIndex, tableName ->
                     val capitalizedName = tableName.replaceFirstChar { it.uppercase() }
                     val properties = tableToProperties[tableName] ?: emptyList()
@@ -2215,24 +2313,8 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     }.joinToString(", ")
                     val beforeParamsWithConstraintAndAC = if (beforeParamsWithConstraint.isEmpty()) "AC : AggCount, CM" else "$beforeParamsWithConstraint, AC : AggCount, CM"
 
-                    val afterSelectParams = beforeParams.mapIndexed { index, param ->
-                        if (index == tableIndex) "com.obabichev.kodama.query.SelectedColumns<CM, $currentTableParam>"
-                        else param
-                    }.joinToString(", ")
-                    val afterSelectParamsWithAC = if (afterSelectParams.isEmpty()) "AC" else "$afterSelectParams, AC"
-
-                    // Only generate typed column selection for regular tables (not subqueries)
-                    // Subqueries use selectAll() or access columns directly through their accessors
-                    if (!isSubquery(tableName)) {
-                        appendLine("@JvmName(\"select${capitalizedName}Column\")")
-                        appendLine("fun <$beforeParamsWithConstraintAndAC> $builderClassName<$beforeGenericWithAC>.select(block: $contextClassName.() -> com.obabichev.kodama.components.TypedColumn<*, ${capitalizedName}Table, CM>): $builderClassName<$afterSelectParamsWithAC> {")
-                        appendLine("    val context = $contextClassName(state)")
-                        appendLine("    val column = context.block()")
-                        appendLine("    state.applySelection(com.obabichev.kodama.query.ColumnSelection(column.column))")
-                        appendLine("    return $builderClassName(state)")
-                        appendLine("}")
-                        appendLine()
-                    }
+                    // Note: Individual column selection is now handled exclusively by .selectAs() with marker interfaces
+                    // This provides consistent named accessors: .selectAs(PersonName) { person.name } -> row.personName
                 }
 
                 // Generate chained selectAggregate() methods for type-safe aggregate selection
@@ -2362,7 +2444,16 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                         // for aggregates causes ambiguous overload resolution in Kotlin.
                         val hasAggregates = pattern.selections.any { it.type == SelectionType.AGGREGATE }
 
-                        if (!hasAggregates) {
+                        // ALSO: Skip patterns that will be handled by marker-based selection execute() generation
+                        // (see "Execute Overloads for Marker-Based Patterns" section below)
+                        // Those patterns are detected by MarkerBasedSelectionScanner and generate their own execute() methods
+                        val isMarkerPattern = pattern.selections.isNotEmpty() &&
+                                             pattern.selections.all { it.type == SelectionType.COMPUTED }
+
+                        // ALSO: Skip empty patterns (no selections at all)
+                        val isEmpty = pattern.selections.isEmpty()
+
+                        if (!hasAggregates && !isMarkerPattern && !isEmpty) {
                             // These SelectionResult execute() methods provide fallback support for expression
                             // selections (like select_isOld { person.age > 30 }) that don't have QueryResult classes
                             val finalState = currentState
@@ -2420,66 +2511,6 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                         appendLine(" * Phantom type marker indicating that aliased selections have been added")
                         appendLine(" */")
                         appendLine("interface HasAliasedSelections : SelectionState")
-                    }
-                    appendLine()
-
-                    // Generate per-marker selectAliased methods using marker token parameters
-                    // API: .selectAliased(OrderCount) { count(order.id) }
-                    // Each marker type creates a distinct overload (no ambiguity!)
-                    // Filter markers to only generate methods for this specific table combination
-                    val combinationSet = combination.toSet()
-                    val relevantMarkers = activeMarkers.filter { marker ->
-                        val markerUsage = markerTableUsage[marker.interfaceName]
-                        // Include marker if:
-                        // 1. No usage tracked (for backward compatibility with old scanning)
-                        // 2. This exact combination is used with this marker
-                        // 3. A subset of this combination is used (e.g., marker used with Order, we're generating for Person+Order)
-                        markerUsage == null || markerUsage.any { usedTables ->
-                            usedTables.all { it in combinationSet }
-                        }
-                    }
-
-                    if (relevantMarkers.isNotEmpty()) {
-                        relevantMarkers.forEach { marker ->
-                            val markerName = marker.interfaceName
-                            val phantomType = "SelectionSet_$markerName"
-                            // Convert PascalCase to snake_case for SQL alias
-                            val sqlAlias = markerName
-                                .replaceFirstChar { it.lowercase() }
-                                .replace(Regex("([a-z])([A-Z])"), "$1_$2")
-                                .lowercase()
-
-                            appendLine("/**")
-                            appendLine(" * Type-safe aliased selection for $markerName")
-                            appendLine(" * Usage: .selectAliased($markerName) { sum(order.cost) }")
-                            appendLine(" * The expression is automatically aliased as '$sqlAlias'")
-                            appendLine(" * Result type: ${marker.resultType}")
-                            appendLine(" * Returns: Builder with $phantomType, enabling typed execute()")
-                            appendLine(" * Can be chained after column selections")
-                            appendLine(" */")
-                            appendLine("inline fun <$genericParams, AC : AggCount, T> $builderClassName<$genericParams, AC>.selectAliased(")
-                            appendLine("    marker: $markerName<T>,")
-                            appendLine("    block: $contextClassName.() -> com.obabichev.kodama.components.expression.Expression")
-                            appendLine("): $builderClassName<$genericParams, $phantomType> {")
-                            appendLine("    val context = $contextClassName(state)")
-                            appendLine("    val expr = context.block()")
-                            appendLine("    val alias = \"$sqlAlias\"")
-                            appendLine()
-                            appendLine("    // Handle both aggregate functions and other expressions")
-                            appendLine("    when (expr) {")
-                            appendLine("        is com.obabichev.kodama.query.AggregateFunction<*> -> {")
-                            appendLine("            expr.alias(alias)")
-                            appendLine("            state._selectables.add(com.obabichev.kodama.query.AggregateSelectable(alias, expr))")
-                            appendLine("            state._aggregateSelections.add(expr)")
-                            appendLine("        }")
-                            appendLine("        else -> {")
-                            appendLine("            state._selectables.add(com.obabichev.kodama.query.ExpressionSelectable(alias, expr))")
-                            appendLine("        }")
-                            appendLine("    }")
-                            appendLine("    return $builderClassName(state)")
-                            appendLine("}")
-                            appendLine()
-                        }
                     }
                     appendLine()
                 }
@@ -2822,101 +2853,131 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
             }
 
             // ============================================================================
-            // Generate specific result classes for discovered selection patterns
+            // Generate marker-specific .selectAs() overloads for type-safe selection
             // ============================================================================
             appendLine()
-            appendLine("// ========== Selection-Specific Result Classes ==========")
-            appendLine("// These classes provide TRUE compile-time safety")
-            appendLine("// Only the selected accessors exist on each class")
+            appendLine("// ========== Marker-Specific selectAs() Overloads ==========")
+            appendLine("// Type-safe overloads that return correct SelectionSet types")
             appendLine()
 
-            val generatedQueryResultClasses = mutableSetOf<String>()
+            // Track generated overloads to avoid duplicates
+            val generatedOverloads = mutableSetOf<String>()
 
-            selectionPatterns.forEach { (tables, patterns) ->
-                patterns.forEach { selectionList ->
-                    // Build class name from selection pattern
-                    // Example: person:All, order:Product -> QueryResult_Person_All_Order_Product
-                    // Example: agg:sum_cost -> QueryResult_Agg_sum_cost
-                    val classNameParts = mutableListOf<String>()
-                    selectionList.forEach { selection ->
-                        val (table, type) = selection.split(":")
-                        classNameParts.add(table.replaceFirstChar { it.uppercase() })
-                        classNameParts.add(type.replaceFirstChar { it.uppercase() })
+            // Generate overloads for each table combination and its selection patterns
+            selectionPatternsByTable.forEach { (tables, patterns) ->
+                patterns.forEach { pattern ->
+                    // Only generate for marker-based selections (COMPUTED for columns, AGGREGATE for aggregates)
+                    val markerSelections = pattern.selections.filter {
+                        it.type == SelectionType.COMPUTED || it.type == SelectionType.AGGREGATE
                     }
-                    val resultClassName = "QueryResult_" + classNameParts.joinToString("_")
+                    if (markerSelections.isEmpty()) return@forEach
 
-                    // Skip if already generated
-                    if (generatedQueryResultClasses.contains(resultClassName)) {
-                        return@forEach
+                    val builderClassName = "AfterFromQueryBuilder_" + tables.joinToString("_") { it.replaceFirstChar { ch -> ch.uppercase() } }
+
+                    // Generate type parameters for the builder (one per table)
+                    val tableTypeParams = tables.mapIndexed { index, tableName ->
+                        "${tableName.replaceFirstChar { it.uppercase() }}Sel"
                     }
-                    generatedQueryResultClasses.add(resultClassName)
 
-                    appendLine("/**")
-                    appendLine(" * Result class for selection pattern: ${selectionList.joinToString(", ")}")
-                    appendLine(" * Only contains accessors for selected columns")
-                    appendLine(" */")
-                    appendLine("class $resultClassName(")
-                    appendLine("    override val resultSet: java.sql.ResultSet,")
-                    appendLine("    override val relations: com.obabichev.kodama.query.RelationsContainer,")
-                    appendLine("    override val selectedColumns: List<com.obabichev.kodama.components.Column<*>>,")
-                    appendLine("    val aggregates: List<com.obabichev.kodama.query.AggregateFunction<*>> = emptyList()")
-                    appendLine(") : com.obabichev.kodama.query.QueryResult {")
-                    appendLine()
+                    // Generate progressive overloads: NoSelections → SelectionSet_a → SelectionSet_a_b → etc.
+                    val accumulatedSelections = mutableListOf<String>()
 
-                    // Separate regular selections from aggregate selections
-                    val regularSelections = selectionList.filter { !it.startsWith("agg:") }
-                    val aggregateSelections = selectionList.filter { it.startsWith("agg:") }
+                    markerSelections.forEach { selection ->
+                        val markerNameCamel = selection.alias  // Already in camelCase: personName
+                        val markerNamePascal = selection.alias.replaceFirstChar { it.uppercase() }  // personName → PersonName
+                        val markerNameSnake = selection.alias.replace(Regex("([a-z])([A-Z])"), "$1_$2").lowercase()  // personName → person_name (for SQL)
 
-                    // Generate accessors - ONE per table (merging multiple selections)
-                    // Group selections by table
-                    val selectionsByTable = regularSelections.groupBy { it.split(":")[0] }
-
-                    selectionsByTable.forEach { (table, selections) ->
-                        val tableCapitalized = table.replaceFirstChar { it.uppercase() }
-                        val accessorName = table.replaceFirstChar { it.lowercase() }  // Property name in camelCase
-
-                        // Determine accessor class based on what was selected
-                        val types = selections.map { it.split(":")[1] }
-                        val accessorClass = if (types.size == 1 && types[0] == "All") {
-                            // Single selection of .all()
-                            "${tableCapitalized}ResultAccessor_All"
-                        } else if (types.size == 1) {
-                            // Single column selection
-                            "${tableCapitalized}ResultAccessor_${types[0]}"
+                        // FROM type: NoSelections or SelectionSet_accumulated
+                        val fromType = if (accumulatedSelections.isEmpty()) {
+                            "com.obabichev.kodama.query.NoSelections"
                         } else {
-                            // Multiple column selections - create combined name
-                            val combinedTypes = types.joinToString("_")
-                            "${tableCapitalized}ResultAccessor_$combinedTypes"
+                            "SelectionSet_" + accumulatedSelections.joinToString("_")
                         }
 
-                        appendLine("    val $accessorName: $accessorClass")
-                        appendLine("        get() = $accessorClass(resultSet, relations, selectedColumns)")
+                        // TO type: SelectionSet with new selection added
+                        accumulatedSelections.add(selection.alias)
+                        val toType = "SelectionSet_" + accumulatedSelections.joinToString("_")
+
+                        // Create unique key for this overload to detect duplicates
+                        val overloadKey = "$builderClassName|$fromType|$markerNamePascal|$toType"
+                        if (generatedOverloads.contains(overloadKey)) {
+                            return@forEach  // Skip duplicate
+                        }
+                        generatedOverloads.add(overloadKey)
+
+                        // Generate method
+                        val isAggregate = selection.type == SelectionType.AGGREGATE
+                        val isExpression = selection.type == SelectionType.COMPUTED && selection.kotlinType == "Boolean"
+                        val isColumn = selection.type == SelectionType.COMPUTED && selection.kotlinType != "Boolean"
+
+                        appendLine("/**")
+                        if (isAggregate) {
+                            appendLine(" * Select aggregate with marker $markerNamePascal")
+                            appendLine(" * Usage: .selectAs($markerNamePascal) { sum(${tables.first().lowercase()}.column) }")
+                        } else if (isExpression) {
+                            appendLine(" * Select expression with marker $markerNamePascal")
+                            appendLine(" * Usage: .selectAs($markerNamePascal) { ${tables.first().lowercase()}.column gt 30 }")
+                        } else {
+                            appendLine(" * Select column with marker $markerNamePascal")
+                            appendLine(" * Usage: .selectAs($markerNamePascal) { ${tables.first().lowercase()}.column }")
+                        }
+                        appendLine(" */")
+                        // Include fromType in JVM name to avoid signature clashes when same marker is used progressively
+                        val jvmNameSuffix = fromType.replace(".", "_").replace("::", "_")
+                        appendLine("@JvmName(\"selectAs_${builderClassName}_${jvmNameSuffix}_${markerNamePascal}\")")
+
+                        val typeParamsStr = tableTypeParams.joinToString(", ")
+                        val builderTypeParamsFrom = "$typeParamsStr, $fromType"
+                        val builderTypeParamsTo = "$typeParamsStr, $toType"
+
+                        appendLine("inline fun <$typeParamsStr> $builderClassName<$builderTypeParamsFrom>.selectAs(")
+                        appendLine("    marker: $markerNamePascal<*>,")  // Add type parameter to marker
+
+                        // Generate context - use SelectContext for the table combination
+                        val contextClassName = if (tables.size == 1) {
+                            "SelectContext_${tables.first().replaceFirstChar { it.uppercase() }}"
+                        } else {
+                            "SelectContext_" + tables.joinToString("_") { it.replaceFirstChar { ch -> ch.uppercase() } }
+                        }
+
+                        if (isAggregate) {
+                            // For aggregates: accept AggregateFunction and add AggregateSelectable
+                            // Use snake_case for SQL alias (e.g., "total_revenue")
+                            appendLine("    block: $contextClassName.() -> com.obabichev.kodama.query.AggregateFunction<*>")
+                            appendLine("): $builderClassName<$builderTypeParamsTo> {")
+                            appendLine("    val context = $contextClassName(state)")
+                            appendLine("    val aggregateFunc = context.block()")
+                            appendLine("    state._selectables.add(com.obabichev.kodama.query.AggregateSelectable(\"$markerNameSnake\", aggregateFunc))")
+                        } else if (isExpression) {
+                            // For expressions: accept Expression and add ExpressionSelectable
+                            // Use camelCase for alias (e.g., "isOld")
+                            appendLine("    block: $contextClassName.() -> com.obabichev.kodama.components.expression.Expression")
+                            appendLine("): $builderClassName<$builderTypeParamsTo> {")
+                            appendLine("    val context = $contextClassName(state)")
+                            appendLine("    val expression = context.block()")
+                            appendLine("    state._selectables.add(com.obabichev.kodama.query.ExpressionSelectable(\"$markerNameCamel\", expression))")
+                        } else {
+                            // For columns: accept TypedColumn and add ColumnSelectable
+                            // Use camelCase (ColumnSelectable converts to snake_case internally)
+                            appendLine("    block: $contextClassName.() -> com.obabichev.kodama.components.TypedColumn<*, *, *>")
+                            appendLine("): $builderClassName<$builderTypeParamsTo> {")
+                            appendLine("    val context = $contextClassName(state)")
+                            appendLine("    val column = context.block()")
+                            appendLine("    state._selectables.add(com.obabichev.kodama.query.ColumnSelectable(\"$markerNameCamel\", column.column))")
+                        }
+                        appendLine("    // Note: We only add to _selectables, not to regular selections")
+                        appendLine("    // The selectable will be included in the SQL query directly")
+                        appendLine("    return $builderClassName(state)")
+                        appendLine("}")
                         appendLine()
                     }
-
-                    // Generate accessors for aggregate functions
-                    aggregateSelections.forEach { aggSelection ->
-                        val accessorName = aggSelection.split(":")[1]  // camelCase: totalRevenue
-                        // Convert camelCase to snake_case for SQL alias lookup
-                        val snakeCaseAlias = accessorName.replace(Regex("([a-z])([A-Z])"), "$1_$2").lowercase()
-
-                        // Aggregate functions (count, sum, avg, min, max) return numeric types
-                        // Use Number for type safety while allowing Long, BigDecimal, etc. from PostgreSQL
-                        appendLine("    val $accessorName: Number")
-                        appendLine("        get() {")
-                        appendLine("            val agg = aggregates.find { it.accessorName == \"$snakeCaseAlias\" }")
-                        appendLine("            return if (agg != null) {")
-                        appendLine("                val index = selectedColumns.size + aggregates.indexOf(agg) + 1")
-                        appendLine("                resultSet.getObject(index) as Number")
-                        appendLine("            } else throw IllegalStateException(\"Aggregate '$accessorName' not found (looking for alias '$snakeCaseAlias')\")")
-                        appendLine("        }")
-                        appendLine()
-                    }
-
-                    appendLine("}")
-                    appendLine()
                 }
             }
+
+            // ============================================================================
+            // Generate specific result classes for discovered selection patterns
+            // ============================================================================
+            val generatedQueryResultClasses = generateQueryResultClasses(this, selectionPatterns, selectionPatternsByTable, activeMarkers)
 
             // ============================================================================
             // Generate unified selection result classes with named accessors
@@ -2975,8 +3036,14 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
 
             selectionPatternsByTable.forEach { (tables, patterns) ->
                 patterns.forEach { pattern ->
-                    // Build class name from selection aliases
-                    val resultClassName = "SelectionResult_" + pattern.selections.joinToString("_") { it.alias }
+                    // Skip empty patterns (no marker selections at all)
+                    // These are handled by the regular QueryResult execute() methods
+                    if (pattern.selections.isEmpty()) {
+                        return@forEach
+                    }
+
+                    // Build class name from selection aliases and table selections
+                    val resultClassName = buildResultClassName(pattern)
 
                     // Skip if already generated
                     if (generatedSelectionResultClasses.contains(resultClassName)) {
@@ -3011,7 +3078,9 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                             "\"${selection.alias}\""
                         }
                     }
-                    appendLine("        val expectedAliases = listOf($expectedAliasesStr)")
+                    // Add type parameter if list is empty to avoid List<Nothing> inference issue
+                    val listType = if (pattern.selections.isEmpty()) "<String>" else ""
+                    appendLine("        val expectedAliases = listOf$listType($expectedAliasesStr)")
                     appendLine("        val actualAliases = selectables.map { it.alias }")
                     appendLine("        require(actualAliases == expectedAliases) { \"Expected aliases \$expectedAliases, got \$actualAliases\" }")
                     appendLine()
@@ -3062,32 +3131,8 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
             appendLine("// They provide TRUE compile-time safety by exposing only selected accessors")
             appendLine()
 
-            // First, generate execute methods for .alias<T>() markers
-            queryCombinations.forEach { combination ->
-                val typeNames = combination.map { it.replaceFirstChar { c -> c.uppercase() } }
-                val builderClassName = "AfterFromQueryBuilder_" + typeNames.joinToString("_")
-                val genericParams = combination.map { "${it.replaceFirstChar { it.uppercase() }}Sel" }.joinToString(", ")
-
-                activeMarkers.forEach { marker ->
-                    val phantomType = "SelectionSet_${marker.interfaceName}"
-                    val resultClassName = "SelectionResult_${marker.interfaceName}"
-
-                    appendLine("/**")
-                    appendLine(" * Execute method for selectAs<${marker.interfaceName}> selection")
-                    appendLine(" */")
-                    appendLine("@JvmName(\"execute_${marker.interfaceName}_${typeNames.joinToString("_")}\")")
-                    appendLine("fun <$genericParams> $builderClassName<$genericParams, $phantomType>.execute(")
-                    appendLine("    transaction: com.obabichev.kodama.execute.JdbcTransaction")
-                    appendLine("): com.obabichev.kodama.query.QueryResultIterable<$resultClassName> {")
-                    appendLine("    val query = this.build()")
-                    appendLine("    val resultSet = transaction.execute(query)")
-                    appendLine("    return com.obabichev.kodama.query.QueryResultIterable(resultSet, query.relations) { rs, relations ->")
-                    appendLine("        $resultClassName(rs, relations, query.select, state._selectables)")
-                    appendLine("    }")
-                    appendLine("}")
-                    appendLine()
-                }
-            }
+            // Generate execute() methods for marker-based selections
+            generateMarkerExecuteMethods(this, selectionPatternsByTable)
 
             // Group patterns by table combination
             selectionPatterns.forEach { (tables, patterns) ->
@@ -3212,6 +3257,8 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
                     }
                 }
             }
+
+            // Mixed pattern execute() methods are generated by generateMarkerExecuteMethods() above
 
             // ============================================================================
             // Generate INSERT extension methods for each table
@@ -3990,6 +4037,253 @@ abstract class KodamaTableBasedCodegenTask : DefaultTask() {
         }
 
         return relationships
+    }
+
+    /**
+     * Build result class name for a selection pattern.
+     * Combines marker aliases and table selections into a unique name.
+     */
+    private fun buildResultClassName(pattern: SelectionPattern): String {
+        val parts = mutableListOf<String>()
+
+        // Add marker aliases
+        pattern.selections.forEach { selection ->
+            parts.add(selection.alias)
+        }
+
+        // Add table names with "with" prefix if both markers and tables exist
+        if (pattern.selections.isNotEmpty() && pattern.columnSelections.isNotEmpty()) {
+            pattern.columnSelections.keys.forEach { tableName ->
+                parts.add("with${tableName.replaceFirstChar { it.uppercase() }}")
+            }
+        }
+
+        return "SelectionResult_" + parts.joinToString("_")
+    }
+
+    /**
+     * Generate execute() methods for marker-based selections (pure and mixed).
+     * Extracted to separate method to avoid JVM bytecode size limit.
+     */
+    private fun generateMarkerExecuteMethods(
+        sb: StringBuilder,
+        selectionPatternsByTable: Map<List<String>, MutableSet<SelectionPattern>>
+    ) {
+        with(sb) {
+            // Generate execute() for pure marker patterns (no table selections)
+            selectionPatternsByTable.forEach { (tables, patterns) ->
+                patterns.forEach { pattern ->
+                    if (pattern.selections.isNotEmpty() && pattern.columnSelections.isEmpty()) {
+                        val resultClassName = buildResultClassName(pattern)
+                        val selectionSetType = "SelectionSet_" + pattern.selections.joinToString("_") { it.alias }
+
+                        val typeNames = tables.map { it.replaceFirstChar { c -> c.uppercase() } }
+                        val builderClassName = "AfterFromQueryBuilder_" + typeNames.joinToString("_")
+                        val genericParams = tables.map { "${it.replaceFirstChar { it.uppercase() }}Sel" }.joinToString(", ")
+
+                        appendLine("/**")
+                        appendLine(" * Execute method for pure marker selection: ${pattern.selections.map { it.alias }}")
+                        appendLine(" */")
+                        appendLine("@JvmName(\"execute_${resultClassName}_${typeNames.joinToString("_")}\")")
+                        appendLine("fun <$genericParams> $builderClassName<$genericParams, $selectionSetType>.execute(")
+                        appendLine("    transaction: com.obabichev.kodama.execute.JdbcTransaction")
+                        appendLine("): com.obabichev.kodama.query.QueryResultIterable<$resultClassName> {")
+                        appendLine("    val query = this.build()")
+                        appendLine("    val resultSet = transaction.execute(query)")
+                        appendLine("    return com.obabichev.kodama.query.QueryResultIterable(resultSet, query.relations) { rs, relations ->")
+                        appendLine("        $resultClassName(rs, relations, query.select, state._selectables)")
+                        appendLine("    }")
+                        appendLine("}")
+                        appendLine()
+                    }
+                }
+            }
+
+            // Generate execute() for mixed patterns (markers + tables)
+            appendLine()
+            appendLine("// ========== Execute Overloads for Mixed Patterns (Markers + Tables) ==========")
+            appendLine()
+
+            val generatedExecuteOverloads = mutableSetOf<String>()
+            selectionPatternsByTable.forEach { (tables, patterns) ->
+                patterns.forEach { pattern ->
+                    if (pattern.selections.isNotEmpty() && pattern.columnSelections.isNotEmpty()) {
+                        val resultClassName = buildResultClassName(pattern)
+                        val selectionSetType = "SelectionSet_" + pattern.selections.joinToString("_") { it.alias }
+
+                        val typeParams = mutableListOf<String>()
+                        tables.forEach { table ->
+                            val typeParam = if (pattern.columnSelections.containsKey(table)) {
+                                "com.obabichev.kodama.query.AllColumnsSelected"
+                            } else {
+                                "${table.replaceFirstChar { it.uppercase() }}Sel"
+                            }
+                            typeParams.add(typeParam)
+                        }
+
+                        val executeKey = tables.joinToString("_") + "|" + typeParams.joinToString("_") + "|" + selectionSetType
+                        if (generatedExecuteOverloads.contains(executeKey)) {
+                            return@forEach
+                        }
+                        generatedExecuteOverloads.add(executeKey)
+
+                        val builderClassName = "AfterFromQueryBuilder_" + tables.joinToString("_") {
+                            it.replaceFirstChar { it.uppercase() }
+                        }
+
+                        val receiverTypeArgs = typeParams.joinToString(", ") + ", $selectionSetType"
+                        val genericParams = typeParams.mapIndexed { index, typeParam ->
+                            if (typeParam.startsWith("com.obabichev.kodama.query.")) {
+                                null
+                            } else {
+                                typeParam
+                            }
+                        }.filterNotNull().joinToString(", ")
+
+                        appendLine("/**")
+                        appendLine(" * Execute overload for mixed pattern: markers=${pattern.selections.map { it.alias }} + tables=${pattern.columnSelections.keys}")
+                        appendLine(" * Returns: $resultClassName")
+                        appendLine(" */")
+                        appendLine("@JvmName(\"execute_$resultClassName\")")
+                        val genericBrackets = if (genericParams.isEmpty()) "" else "<$genericParams> "
+                        appendLine("fun $genericBrackets$builderClassName<$receiverTypeArgs>.execute(transaction: com.obabichev.kodama.execute.JdbcTransaction): com.obabichev.kodama.query.QueryResultIterable<$resultClassName> {")
+                        appendLine("    val query = this.build()")
+                        appendLine("    val resultSet = transaction.execute(query)")
+                        appendLine("    return com.obabichev.kodama.query.QueryResultIterable(resultSet, query.relations) { rs, relations ->")
+                        appendLine("        $resultClassName(rs, relations, query.select, state._selectables)")
+                        appendLine("    }")
+                        appendLine("}")
+                        appendLine()
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Generate query result classes for discovered selection patterns.
+     * This includes result class definitions and execute() method overloads.
+     */
+    private fun generateQueryResultClasses(
+        sb: StringBuilder,
+        selectionPatterns: Map<List<String>, Set<List<String>>>,
+        selectionPatternsByTable: Map<List<String>, MutableSet<SelectionPattern>>,
+        activeMarkers: Set<SelectionMarkerInfo>
+    ): Set<String> {
+        val generatedQueryResultClasses = mutableSetOf<String>()
+
+        with(sb) {
+            appendLine()
+            appendLine("// ========== Selection-Specific Result Classes ==========")
+            appendLine("// These classes provide TRUE compile-time safety")
+            appendLine("// Only the selected accessors exist on each class")
+            appendLine()
+
+            selectionPatterns.forEach { (tables, patterns) ->
+                patterns.forEach { selectionList ->
+                    // Build class name from selection pattern
+                    // Example: person:All, order:Product -> QueryResult_Person_All_Order_Product
+                    // Example: agg:sum_cost -> QueryResult_Agg_sum_cost
+                    val classNameParts = mutableListOf<String>()
+                    selectionList.forEach { selection ->
+                        val (table, type) = selection.split(":")
+                        classNameParts.add(table.replaceFirstChar { it.uppercase() })
+                        classNameParts.add(type.replaceFirstChar { it.uppercase() })
+                    }
+                    val resultClassName = "QueryResult_" + classNameParts.joinToString("_")
+
+                    // Skip if already generated
+                    if (generatedQueryResultClasses.contains(resultClassName)) {
+                        return@forEach
+                    }
+                    generatedQueryResultClasses.add(resultClassName)
+
+                    appendLine("/**")
+                    appendLine(" * Result class for selection pattern: ${selectionList.joinToString(", ")}")
+                    appendLine(" * Only contains accessors for selected columns")
+                    appendLine(" */")
+                    appendLine("class $resultClassName(")
+                    appendLine("    override val resultSet: java.sql.ResultSet,")
+                    appendLine("    override val relations: com.obabichev.kodama.query.RelationsContainer,")
+                    appendLine("    override val selectedColumns: List<com.obabichev.kodama.components.Column<*>>,")
+                    appendLine("    val aggregates: List<com.obabichev.kodama.query.AggregateFunction<*>> = emptyList()")
+                    appendLine(") : com.obabichev.kodama.query.QueryResult {")
+                    appendLine()
+
+                    // Separate regular selections from aggregate selections
+                    val regularSelections = selectionList.filter { !it.startsWith("agg:") && !it.startsWith("col:") }
+                    val aggregateSelections = selectionList.filter { it.startsWith("agg:") }
+                    val columnSelections = selectionList.filter { it.startsWith("col:") }
+
+                    // Generate accessors - ONE per table (merging multiple selections)
+                    // Group selections by table
+                    val selectionsByTable = regularSelections.groupBy { it.split(":")[0] }
+
+                    selectionsByTable.forEach { (table, selections) ->
+                        val tableCapitalized = table.replaceFirstChar { it.uppercase() }
+                        val accessorName = table.replaceFirstChar { it.lowercase() }  // Property name in camelCase
+
+                        // Determine accessor class based on what was selected
+                        val types = selections.map { it.split(":")[1] }
+                        val accessorClass = if (types.size == 1 && types[0] == "All") {
+                            // Single selection of .all()
+                            "${tableCapitalized}ResultAccessor_All"
+                        } else if (types.size == 1) {
+                            // Single column selection
+                            "${tableCapitalized}ResultAccessor_${types[0]}"
+                        } else {
+                            // Multiple column selections - create combined name
+                            val combinedTypes = types.joinToString("_")
+                            "${tableCapitalized}ResultAccessor_$combinedTypes"
+                        }
+
+                        appendLine("    val $accessorName: $accessorClass")
+                        appendLine("        get() = $accessorClass(resultSet, relations, selectedColumns)")
+                        appendLine()
+                    }
+
+                    // Generate accessors for aggregate functions
+                    aggregateSelections.forEach { aggSelection ->
+                        val accessorName = aggSelection.split(":")[1]  // camelCase: totalRevenue
+                        // Convert camelCase to snake_case for SQL alias lookup
+                        val snakeCaseAlias = accessorName.replace(Regex("([a-z])([A-Z])"), "$1_$2").lowercase()
+
+                        // Aggregate functions (count, sum, avg, min, max) return numeric types
+                        // Use Number for type safety while allowing Long, BigDecimal, etc. from PostgreSQL
+                        appendLine("    val $accessorName: Number")
+                        appendLine("        get() {")
+                        appendLine("            val agg = aggregates.find { it.accessorName == \"$snakeCaseAlias\" }")
+                        appendLine("            return if (agg != null) {")
+                        appendLine("                val index = selectedColumns.size + aggregates.indexOf(agg) + 1")
+                        appendLine("                resultSet.getObject(index) as Number")
+                        appendLine("            } else throw IllegalStateException(\"Aggregate '$accessorName' not found (looking for alias '$snakeCaseAlias')\")")
+                        appendLine("        }")
+                        appendLine()
+                    }
+
+                    // Generate accessors for marker-based column selections
+                    columnSelections.forEach { colSelection ->
+                        val markerName = colSelection.split(":")[1]  // e.g., "OrgId"
+                        // Convert PascalCase to camelCase for accessor name: OrgId -> orgId
+                        val accessorName = markerName.replaceFirstChar { it.lowercase() }
+                        // Convert PascalCase to snake_case for SQL alias: OrgId -> org_id
+                        val snakeCaseAlias = markerName
+                            .replaceFirstChar { it.lowercase() }
+                            .replace(Regex("([a-z])([A-Z])"), "$1_$2")
+                            .lowercase()
+
+                        appendLine("    val $accessorName: Any?")
+                        appendLine("        get() = resultSet.getObject(\"$snakeCaseAlias\")")
+                        appendLine()
+                    }
+
+                    appendLine("}")
+                    appendLine()
+                }
+            }
+        }
+
+        return generatedQueryResultClasses
     }
 
     /**

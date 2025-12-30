@@ -43,6 +43,9 @@ class Query(
         // Add selectables (expressions, constants, subqueries, etc.)
         selectItems.addAll(selectables.map { selectable ->
             when (selectable) {
+                is ColumnSelectable -> {
+                    "\"${selectable.column.relation.name}\".\"${selectable.column.name}\" AS \"${selectable.sqlAlias}\""
+                }
                 is ExpressionSelectable -> {
                     "${selectable.expression.toSql()} AS \"${selectable.alias}\""
                 }

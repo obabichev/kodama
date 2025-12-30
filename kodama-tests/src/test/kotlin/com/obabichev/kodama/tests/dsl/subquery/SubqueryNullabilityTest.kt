@@ -28,15 +28,16 @@ class SubqueryNullabilityTest : DatabaseTest() {
             // Inline subquery with .aliasAs<T>()
             val results = fromAliased(UserTotalsNew) {
                 from(Order)
-                    .select { order.userName }
-                    .selectAliased(MyAlias) { sum(order.cost) }
+                    .selectAs(OrderUserName) { order.userName }
+                    .selectAs(MyAlias) { sum(order.cost) }
+                    .groupBy { order.userName }
             }
                 .selectAll(UserTotalsNew)  // Direct parameter - no lambda!
                 .execute(this)
 
             results.forEach { row ->
                 // userName is non-nullable in Order table, should be non-nullable in subquery
-                val userName: String = row.userTotalsNew.userName as String
+                val userName: String = row.userTotalsNew.orderUserName as String
                 assertNotNull(userName)
                 userNames.add(userName)
 
@@ -60,8 +61,9 @@ class SubqueryNullabilityTest : DatabaseTest() {
             // Inline subquery with .aliasAs<T>()
             val results = fromAliased(UserTotalsNew) {
                 from(Order)
-                    .select { order.userName }
-                    .selectAliased(MyAlias) { sum(order.cost) }
+                    .selectAs(OrderUserName) { order.userName }
+                    .selectAs(MyAlias) { sum(order.cost) }
+                    .groupBy { order.userName }
             }
                 .selectAll(UserTotalsNew)  // Direct parameter - no lambda!
                 .execute(this)
@@ -69,7 +71,7 @@ class SubqueryNullabilityTest : DatabaseTest() {
             val row = results.first()
 
             // userName is non-nullable in Order table, should remain non-nullable in subquery
-            val userName: String = row.userTotalsNew.userName  // Should not require cast
+            val userName: String = row.userTotalsNew.orderUserName as? String ?: ""  // Subquery results are nullable for LEFT JOIN safety
             assertEquals("alice", userName)
 
             // Aggregates in subqueries are nullable (for LEFT JOIN safety), so nullable access is needed

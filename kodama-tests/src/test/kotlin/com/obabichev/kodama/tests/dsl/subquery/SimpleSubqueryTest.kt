@@ -26,13 +26,14 @@ class SimpleSubqueryTest : DatabaseTest() {
             // Inline subquery with marker token parameter API
             val results = fromAliased(UserTotalsNew) {
                 from(Order)
-                    .select { order.userName }
-                    .selectAliased(MyAlias) { sum(order.cost) }
+                    .selectAs(OrderUserName) { order.userName }
+                    .selectAs(MyAlias) { sum(order.cost) }
+                    .groupBy { order.userName }
             }
                 .selectAll(UserTotalsNew)  // Direct parameter - no lambda!
                 .execute(this)
 
-            val users = results.map { it.userTotalsNew.userName }.toSet()
+            val users = results.map { it.userTotalsNew.orderUserName as? String ?: "" }.toSet()
             assertTrue(users.contains("alice"), "Should have alice")
             assertTrue(users.contains("bob"), "Should have bob")
         }
@@ -54,10 +55,10 @@ class SimpleSubqueryTest : DatabaseTest() {
             val results = from(Person)
                 .joinAliased(
                     from(Order)
-                        .select { order.userName }
+                        .selectAs(OrderUserName) { order.userName }
                         .build()
                         .aliasAs<UsersWithOrders>()
-                ) { person.name eq this.usersWithOrders.userName }
+                ) { person.name eq this.usersWithOrders.orderUserName }
                 .selectAll(Person)
                 .selectAll(UsersWithOrders)  // Direct parameter - no lambda!
                 .execute(this)
@@ -86,10 +87,11 @@ class SimpleSubqueryTest : DatabaseTest() {
             val results = from(Person)
                 .leftJoinAliased(
                     from(Order)
-                        .select { order.userName }
-                        .selectAliased(OrderCount) { count(order.id) }
+                        .selectAs(OrderUserName) { order.userName }
+                        .selectAs(OrderCount) { count(order.id) }
+                        .groupBy { order.userName }
                         .build()
-                        .aliasAs<OrderCounts>()) { person.name eq this.orderCounts.userName }
+                        .aliasAs<OrderCounts>()) { person.name eq this.orderCounts.orderUserName }
                 .selectAll(Person)
                 .execute(this)
 
@@ -111,16 +113,21 @@ class SimpleSubqueryTest : DatabaseTest() {
 
         withConnection {
             // Test the new inline .aliasAs<T>() API - provides compile-time type safety!
-            val results = fromAliased(UserTotalSubquery) {
+            val query = fromAliased(UserTotalSubquery) {
                 from(Order)
-                    .select { order.userName }
-                    .selectAliased(MyAlias) { sum(order.cost) }
+                    .selectAs(OrderUserName) { order.userName }
+                    .selectAs(MyAlias) { sum(order.cost) }
+                    .groupBy { order.userName }
             }
-                .selectAll(UserTotalSubquery)  // Direct parameter - no lambda!
+                .selectAll(UserTotalSubquery)
+
+            println(query.build().sql())
+
+            val results = query  // Direct parameter - no lambda!
                 .execute(this)
 
             val userTotals = results.map {
-                it.userTotalSubquery.userName to (it.userTotalSubquery.myAlias?.toInt() ?: 0)
+                (it.userTotalSubquery.orderUserName ?: "") to (it.userTotalSubquery.myAlias?.toInt() ?: 0)
             }.toList().sortedBy { it.first }
 
             assertEquals(2, userTotals.size, "Should have 2 users")
