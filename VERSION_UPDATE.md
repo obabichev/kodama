@@ -8,7 +8,7 @@ This guide explains how to update the Kodama version for new releases.
 
 **`gradle.properties`** (Root directory - single source of truth)
 ```properties
-version=0.3.0  # Change this
+version=0.4.0  # Change this
 ```
 
 That's it! The `kodama-compiler-plugin` automatically reads this version from the parent `gradle.properties`.
@@ -30,7 +30,7 @@ Search and replace all instances of the old version with the new version:
 grep -r "version \"0.2.0\"" doc/ README.md
 
 # Or use sed to replace (review changes first!)
-find . -name "*.md" -type f -exec sed -i '' 's/0\.2\.0/0.3.0/g' {} \;
+find . -name "*.md" -type f -exec sed -i '' 's/0\.2\.0/0.4.0/g' {} \;
 ```
 
 ### 3. Test the Build
@@ -50,7 +50,7 @@ ls ~/.m2/repository/com/obabichev/kodama/kodama-compiler-plugin/
 
 ## Detailed Release Process
 
-### For Regular Releases (e.g., 0.2.0 → 0.3.0)
+### For Regular Releases (e.g., 0.2.0 → 0.4.0)
 
 1. **Update Version File**
    ```bash
@@ -82,8 +82,8 @@ ls ~/.m2/repository/com/obabichev/kodama/kodama-compiler-plugin/
 5. **Commit Changes**
    ```bash
    git add .
-   git commit -m "Release version 0.3.0"
-   git tag v0.3.0
+   git commit -m "Release version 0.4.0"
+   git tag v0.4.0
    ```
 
 6. **Publish** (see `doc/publishing.md` for details)
@@ -98,17 +98,17 @@ ls ~/.m2/repository/com/obabichev/kodama/kodama-compiler-plugin/
 7. **Push to Repository**
    ```bash
    git push origin main
-   git push origin v0.3.0
+   git push origin v0.4.0
    ```
 
-### For Snapshot Releases (e.g., 0.3.0-SNAPSHOT)
+### For Snapshot Releases (e.g., 0.4.0-SNAPSHOT)
 
 For development versions between releases:
 
 1. **Update Version to SNAPSHOT**
    ```properties
    # In gradle.properties only
-   version=0.3.0-SNAPSHOT
+   version=0.4.0-SNAPSHOT
    ```
 
 2. **Build and Publish**
@@ -148,7 +148,7 @@ Example: 0.2.0
 - Add new aggregate functions
 - Add UPDATE/DELETE support
 - Add new JOIN types
-- Example: 0.2.0 → 0.3.0
+- Example: 0.2.0 → 0.4.0
 
 **PATCH** (Bug fixes, backward compatible)
 - Fix query generation bugs
@@ -199,7 +199,7 @@ NEW_VERSION=$1
 
 if [ -z "$NEW_VERSION" ]; then
     echo "Usage: ./update-version.sh <new-version>"
-    echo "Example: ./update-version.sh 0.3.0"
+    echo "Example: ./update-version.sh 0.4.0"
     exit 1
 fi
 
@@ -232,7 +232,7 @@ Before pushing a new version:
 - [ ] New version appears in both:
   - `~/.m2/repository/com/obabichev/kodama/kodama-core/`
   - `~/.m2/repository/com/obabichev/kodama/kodama-compiler-plugin/`
-- [ ] Git tag created (e.g., `v0.3.0`)
+- [ ] Git tag created (e.g., `v0.4.0`)
 - [ ] Changes committed and pushed
 
 ## Common Issues
@@ -272,15 +272,15 @@ grep -r "0\.2\.0" . --include="*.md"
 
 ## Release Workflow Example
 
-Here's a complete example of releasing version 0.3.0:
+Here's a complete example of releasing version 0.4.0:
 
 ```bash
 # 1. Create release branch
-git checkout -b release/0.3.0
+git checkout -b release/0.4.0
 
 # 2. Update versions
-echo "version=0.3.0" > gradle.properties
-echo "version=0.3.0" > kodama-compiler-plugin/gradle.properties
+echo "version=0.4.0" > gradle.properties
+echo "version=0.4.0" > kodama-compiler-plugin/gradle.properties
 
 # 3. Update documentation (manually or with sed)
 # ... edit README.md, doc/*.md ...
@@ -291,25 +291,25 @@ echo "version=0.3.0" > kodama-compiler-plugin/gradle.properties
 
 # 5. Commit
 git add .
-git commit -m "Release 0.3.0
+git commit -m "Release 0.4.0
 
-- Updated version to 0.3.0
+- Updated version to 0.4.0
 - Updated all documentation
 - See CHANGELOG.md for details"
 
 # 6. Tag
-git tag -a v0.3.0 -m "Release version 0.3.0"
+git tag -a v0.4.0 -m "Release version 0.4.0"
 
 # 7. Merge to main
 git checkout main
-git merge release/0.3.0
+git merge release/0.4.0
 
 # 8. Publish
 ./gradlew clean build publishAll  # Publishes both core and compiler plugin to Maven Central
 
 # 9. Push
 git push origin main
-git push origin v0.3.0
+git push origin v0.4.0
 
 # 10. Start next development version
 sed -i '' 's/^version=.*/version=0.4.0-SNAPSHOT/' gradle.properties

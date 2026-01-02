@@ -34,7 +34,7 @@ When publishing, three packages are uploaded to Maven Central:
 - **Usage**:
   ```kotlin
   dependencies {
-      implementation("com.obabichev.kodama:kodama-core:0.3.0")
+      implementation("com.obabichev.kodama:kodama-core:0.4.0")
   }
   ```
 
@@ -49,7 +49,7 @@ When publishing, three packages are uploaded to Maven Central:
 - **Usage**: Enables modern plugin syntax:
   ```kotlin
   plugins {
-      id("com.obabichev.kodama") version "0.3.0"
+      id("com.obabichev.kodama") version "0.4.0"
   }
   ```
 
@@ -137,7 +137,7 @@ The release bundle contains all required artifacts for Maven Central:
 - `*.sha1` - SHA1 checksums for all files
 
 ### Total Files
-- **87 files** for version 0.3.0 (includes all 3 modules with all artifacts and checksums)
+- **87 files** for version 0.4.0 (includes all 3 modules with all artifacts and checksums)
 
 ## Project Configuration
 
@@ -250,17 +250,17 @@ For a completely clean release:
 
 ```bash
 # List artifacts
-ls -lh ~/.m2/repository/com/obabichev/kodama/kodama-core/0.3.0/
+ls -lh ~/.m2/repository/com/obabichev/kodama/kodama-core/0.4.0/
 
 # Verify GPG signature
-gpg --verify ~/.m2/repository/com/obabichev/kodama/kodama-core/0.3.0/kodama-core-0.3.0.pom.asc \
-              ~/.m2/repository/com/obabichev/kodama/kodama-core/0.3.0/kodama-core-0.3.0.pom
+gpg --verify ~/.m2/repository/com/obabichev/kodama/kodama-core/0.4.0/kodama-core-0.4.0.pom.asc \
+              ~/.m2/repository/com/obabichev/kodama/kodama-core/0.4.0/kodama-core-0.4.0.pom
 ```
 
 ### Check Bundle Contents
 
 ```bash
-unzip -l build/distributions/kodama-0.3.0-bundle.zip
+unzip -l build/distributions/kodama-0.4.0-bundle.zip
 ```
 
 Expected: 87 files for 3 modules with all required artifacts and checksums.

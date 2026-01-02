@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-01-02
+
 ### Changed
 
 - **Unified marker-based selection API** - `.selectAs()` now works for all selection types
@@ -35,7 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     ```
   - **Note**: `.selectAll(Table)` remains available for selecting all columns from a table
 
-## [0.3.0] - TBD
+### Fixed
+
+- **Subquery type inference** - Fixed bug where subquery columns were incorrectly typed as `Number?` instead of their actual type (e.g., `String?`)
+  - Subquery result accessors now correctly preserve the source column types
+  - Improved type safety for `.selectAs()` in subquery contexts
+
+## [0.3.0] - 2025-12-28
 
 ### Added
 
@@ -69,10 +77,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Cleaner, more intuitive API with less boilerplate
   - Closer to SQL syntax where FROM is the first meaningful clause
   - All generated `from()` and `fromAliased()` functions are now top-level functions
-
-### Fixed
-
-*(Bug fixes will be documented here during 0.3.0 development)*
 
 ---
 
