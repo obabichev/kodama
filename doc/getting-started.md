@@ -21,11 +21,11 @@ Once published to Maven Central, simply add Kodama to your `build.gradle.kts`:
 
 ```kotlin
 plugins {
-    id("com.obabichev.kodama") version "0.3.0"
+    id("com.obabichev.kodama") version "0.4.0"
 }
 
 dependencies {
-    implementation("com.obabichev.kodama:kodama-core:0.3.0")
+    implementation("com.obabichev.kodama:kodama-core:0.4.0")
 
     // SLF4J logging implementation (required - choose one)
     implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")
@@ -86,11 +86,11 @@ Now you can use Kodama in your `build.gradle.kts`:
 
 ```kotlin
 plugins {
-    id("com.obabichev.kodama") version "0.3.0"
+    id("com.obabichev.kodama") version "0.4.0"
 }
 
 dependencies {
-    implementation("com.obabichev.kodama:kodama-core:0.3.0")
+    implementation("com.obabichev.kodama:kodama-core:0.4.0")
 
     // SLF4J logging implementation (required)
     implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")
@@ -194,7 +194,7 @@ Here's a complete `build.gradle.kts` with all required dependencies:
 ```kotlin
 plugins {
     kotlin("jvm") version "2.2.0"
-    id("com.obabichev.kodama") version "0.3.0"
+    id("com.obabichev.kodama") version "0.4.0"
 }
 
 repositories {
@@ -210,7 +210,7 @@ kotlin {
 
 dependencies {
     // Kodama
-    implementation("com.obabichev.kodama:kodama-core:0.3.0")
+    implementation("com.obabichev.kodama:kodama-core:0.4.0")
 
     // Logging (required - choose one)
     implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")

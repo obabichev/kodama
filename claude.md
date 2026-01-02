@@ -380,7 +380,7 @@ Generated code is now placed in `{schemaPackage}.generated` instead of hardcoded
 
 ## Current State
 
-- Version: 0.3.0 (Alpha)
+- Version: 0.4.0 (Alpha)
 - **All tests passing** including:
   - QuerySimpleDataClassTests (8 tests)
   - QueryAggregateTests (3 tests)
@@ -393,7 +393,7 @@ Generated code is now placed in `{schemaPackage}.generated` instead of hardcoded
   - ✅ INNER JOIN with multiple tables
   - ✅ WHERE with eq operator
   - ✅ ORDER BY with asc/desc
-  - ✅ LIMIT and OFFSET for pagination ✅ NEW (v0.3.0)
+  - ✅ LIMIT and OFFSET for pagination ✅ NEW (v0.4.0)
   - ✅ Aggregate functions (COUNT, SUM, AVG, MIN, MAX)
   - ✅ Explicit GROUP BY with chainable `.groupBy { column }` syntax
   - ✅ INSERT statements with compile-time validation

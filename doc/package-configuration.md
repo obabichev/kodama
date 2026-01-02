@@ -15,7 +15,7 @@ By default, Kodama automatically detects your package structure:
 ```kotlin
 // No configuration needed!
 plugins {
-    id("com.obabichev.kodama") version "0.3.0"
+    id("com.obabichev.kodama") version "0.4.0"
 }
 ```
 

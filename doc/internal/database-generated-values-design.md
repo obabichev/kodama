@@ -15,7 +15,7 @@ Current INSERT generation requires all columns as parameters. We need a flexible
 - Is extensible for future generation strategies
 - Maintains compile-time type safety
 
-## Phase 1 Scope (Version 0.3.0)
+## Phase 1 Scope (Version 0.4.0)
 
 **Immediate implementation:** Auto-increment columns only (SERIAL and IDENTITY)
 
@@ -432,7 +432,7 @@ fun Orders.insert(
 
 ## Implementation Phases
 
-### Phase 1: Core Infrastructure (Immediate - 0.3.0)
+### Phase 1: Core Infrastructure (Immediate - 0.4.0)
 
 **Goal:** Support auto-increment columns (SERIAL and IDENTITY)
 
@@ -764,7 +764,7 @@ val id = varchar("id", 36).customGeneration {
 
 Implement in phases:
 
-- **Phase 1 (0.3.0):** SERIAL support only (AlwaysGenerated)
+- **Phase 1 (0.4.0):** SERIAL support only (AlwaysGenerated)
 - **Phase 2 (0.4.0):** DEFAULT values (DefaultValue strategy)
 - **Phase 3 (0.5.0):** GENERATED columns (Computed strategy)
 - **Phase 4+:** Advanced features as needed

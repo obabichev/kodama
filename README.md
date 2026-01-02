@@ -2,7 +2,7 @@
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![Kotlin](https://img.shields.io/badge/kotlin-2.2.0+-blue.svg)](https://kotlinlang.org/)
-[![Version](https://img.shields.io/badge/version-0.3.0-orange.svg)]()
+[![Version](https://img.shields.io/badge/version-0.4.0-orange.svg)]()
 
 **Kodama** (Kotlin Data Mapper) is a type-safe SQL query builder for Kotlin and PostgreSQL. Unlike traditional ORMs,
 Kodama provides 100% compile-time type safety through code generation, eliminating runtime errors and reflection
@@ -29,11 +29,11 @@ Once published to Maven Central, simply add to your `build.gradle.kts`:
 
 ```kotlin
 plugins {
-    id("com.obabichev.kodama") version "0.3.0"
+    id("com.obabichev.kodama") version "0.4.0"
 }
 
 dependencies {
-    implementation("com.obabichev.kodama:kodama-core:0.3.0")
+    implementation("com.obabichev.kodama:kodama-core:0.4.0")
 
     // SLF4J logging implementation (choose one)
     implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")
@@ -89,11 +89,11 @@ dependencyResolutionManagement {
 
 ```kotlin
 plugins {
-    id("com.obabichev.kodama") version "0.3.0"
+    id("com.obabichev.kodama") version "0.4.0"
 }
 
 dependencies {
-    implementation("com.obabichev.kodama:kodama-core:0.3.0")
+    implementation("com.obabichev.kodama:kodama-core:0.4.0")
 
     // SLF4J logging implementation (required)
     implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.24.3")
