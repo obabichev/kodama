@@ -83,3 +83,20 @@ class ExpressionSelectable(
         return resultSet.getObject(position)
     }
 }
+
+/**
+ * Column selection with an alias (for marker-based selections)
+ */
+class ColumnSelectable(
+    override val alias: String,  // camelCase alias for validation (e.g., "personName")
+    val column: com.obabichev.kodama.components.Column<*>
+) : Selectable {
+    override val type: SelectableType = SelectableType.COMPUTED
+
+    /** SQL column alias in snake_case (e.g., "person_name") */
+    val sqlAlias: String = alias.replace(Regex("([a-z])([A-Z])"), "$1_$2").lowercase()
+
+    override fun getValue(resultSet: java.sql.ResultSet, position: Int): Any? {
+        return resultSet.getObject(position)
+    }
+}

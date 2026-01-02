@@ -508,15 +508,15 @@ println("Created user with ID: $generatedId")
 - Type-safe: code won't compile if you try to provide a value for auto-generated columns
 - Works with any primary key or unique column
 
-### Aggregate Functions
+### Marker-Based Selections
 
-Kodama supports type-safe aggregate functions with named accessors:
+Kodama uses a unified `.selectAs()` API for type-safe selections with marker interfaces. This works for columns, aggregates, and expressions:
 
 ```kotlin
 // Aggregates only - no GROUP BY needed
 val results = from(Order)
-    .selectAliased(TotalRevenue) { sum(order.cost) }
-    .selectAliased(OrderCount) { count(order.id) }
+    .selectAs(TotalRevenue) { sum(order.cost) }
+    .selectAs(OrderCount) { count(order.id) }
     .execute(transaction)
 
 // Access with type-safe named accessors
@@ -527,15 +527,24 @@ results.forEach { row ->
 }
 
 // Mix columns with aggregates - GROUP BY required
+// Use .selectAs() for both columns and aggregates for consistent named accessors
 val byUser = from(Order)
-    .select { order.userName }  // Regular column selection
-    .selectAliased(UserTotal) { sum(order.cost) }  // Named aggregate
+    .selectAs(OrderUserName) { order.userName }  // Column selection
+    .selectAs(UserTotal) { sum(order.cost) }  // Aggregate selection
     .groupBy { order.userName }  // Must group by non-aggregate columns
     .execute(transaction)
 
 byUser.forEach { row ->
-    println("${row.order.userName}: ${row.userTotal}")
+    println("${row.orderUserName}: ${row.userTotal}")  // Both use named accessors!
 }
+
+// Expression selections (boolean, comparisons, etc.)
+from(Person)
+    .selectAs(IsAdult) { person.age gte 18 }
+    .execute(transaction)
+    .forEach { row ->
+        val isAdult: Boolean = row.isAdult  // Properly typed!
+    }
 ```
 
 **Available Functions:**
@@ -583,16 +592,16 @@ When mixing regular columns with aggregate functions, use explicit GROUP BY:
 ```kotlin
 // Single column GROUP BY
 from(Order)
-    .select { order.userName }
-    .selectAliased(TotalCost) { sum(order.cost) }
+    .selectAs(OrderUserName) { order.userName }
+    .selectAs(TotalCost) { sum(order.cost) }
     .groupBy { order.userName }  // Returns one column
     .execute(transaction)
 
 // Multiple columns - chain groupBy calls
 from(Order)
-    .select { order.userName }
-    .select { order.product }
-    .selectAliased(TotalCost) { sum(order.cost) }
+    .selectAs(OrderUserName) { order.userName }
+    .selectAs(OrderProduct) { order.product }
+    .selectAs(TotalCost) { sum(order.cost) }
     .groupBy { order.userName }   // First grouping column
     .groupBy { order.product }    // Second grouping column
     .execute(transaction)

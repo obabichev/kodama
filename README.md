@@ -182,12 +182,22 @@ withConnection { transaction ->
 from(Users)
     .selectAll(Users)
     .where { users.age eq 25 }
+    .execute(transaction)
+    .forEach { row ->
+        val email = row.users.email  // Table-scoped accessor
+        val age = row.users.age
+    }
 
-// Select specific columns (chain .select calls)
+// Select specific columns with named accessors (recommended)
 from(Users)
-    .select { users.email }
-    .select { users.age }
+    .selectAs(UserEmail) { users.email }
+    .selectAs(UserAge) { users.age }
     .where { users.age eq 25 }
+    .execute(transaction)
+    .forEach { row ->
+        val email = row.userEmail  // Direct named accessor - type-safe!
+        val age = row.userAge
+    }
 ```
 
 **Generates:**
@@ -198,8 +208,8 @@ SELECT "users"."id", "users"."email", "users"."age"
 FROM "users"
 WHERE "age" = ?
 
--- select specific columns
-SELECT "users"."email", "users"."age"
+-- selectAs with markers
+SELECT "users"."email" AS "user_email", "users"."age" AS "user_age"
 FROM "users"
 WHERE "age" = ?
 ```
@@ -291,51 +301,65 @@ ORDER BY "id" ASC
 LIMIT 10 OFFSET 20
 ```
 
-### Aggregates with Type Inference
+### Marker-Based Selections with `.selectAs()`
+
+Kodama uses a unified `.selectAs()` API for type-safe selections with marker interfaces:
 
 ```kotlin
-// Aggregates only - no GROUP BY needed
-from(Orders)
-    .selectAliased(TotalRevenue) { sum(orders.cost) }
-    .selectAliased(OrderCount) { count(orders.id) }
+// Column selections - marker infers from column type
+from(Users)
+    .selectAs(UserName) { users.name }  // String
+    .selectAs(UserAge) { users.age }    // Int
     .execute(transaction)
 
-// Results have type-safe named accessors with proper types
+// Aggregate selections - marker infers from aggregate function
+from(Orders)
+    .selectAs(TotalRevenue) { sum(orders.cost) }  // Number
+    .selectAs(OrderCount) { count(orders.id) }    // Long
+    .execute(transaction)
+
+// Expression selections - marker infers Boolean type
+from(Users)
+    .selectAs(IsAdult) { users.age gte 18 }  // Boolean
+    .execute(transaction)
+
+// Results have type-safe named accessors
 results.forEach { row ->
-    val total = row.totalRevenue  // Long? - sum() infers Long? type
-    val count = row.orderCount    // Long? - count() infers Long? type
+    val total = row.totalRevenue  // Number - properly typed!
+    val count = row.orderCount    // Long - properly typed!
+    val isAdult = row.isAdult     // Boolean - properly typed!
 }
 ```
 
 **Generates:**
 
 ```sql
+-- Aggregates
 SELECT SUM(cost) AS "total_revenue", COUNT(id) AS "order_count"
 FROM "orders"
+
+-- Expressions
+SELECT (age >= 18) AS "is_adult"
+FROM "users"
 ```
 
 **Note:** When selecting only aggregates (no regular columns), GROUP BY is not needed. GROUP BY is only required when mixing regular columns with aggregates.
 
-### Subqueries and Expression Selections
+### Subqueries
 
 ```kotlin
 // Subquery in FROM clause
 fromAliased(UserTotals) {
     from(Orders)
-        .select { orders.userName }
-        .selectAliased(TotalCost) { sum(orders.cost) }
+        .selectAs(UserName) { orders.userName }
+        .selectAs(TotalCost) { sum(orders.cost) }
 }
     .selectAll(UserTotals)
     .execute(transaction)
-
-// Boolean expression selection
-from(Users)
-    .selectAliased(IsAdult) { users.age gte 18 }
-    .execute(transaction)
-
-results.forEach { row ->
-    val isAdult: Boolean = row.isAdult  // Properly typed!
-}
+    .forEach { row ->
+        val userName = row.userTotals.userName
+        val totalCost = row.userTotals.totalCost
+    }
 ```
 
 ### INSERT Statements

@@ -45,10 +45,11 @@ class SubqueryTests : DatabaseTest() {
         withConnection {
             // Inline subquery with .aliasAs<T>() in FROM clause
             val queryBuilder = fromAliased(UserTotals) {
-                    from(Order)
-                        .select { order.userName }
-                        .selectAliased(TotalCost) { sum(order.cost) }
-                }
+                from(Order)
+                    .selectAs(OrderUserName) { order.userName }
+                    .selectAs(TotalCost) { sum(order.cost) }
+                    .groupBy { order.userName }
+            }
                 .selectAll(UserTotals)
 
             val sql = queryBuilder.build().sql()
@@ -58,8 +59,8 @@ class SubqueryTests : DatabaseTest() {
 
             val results = queryBuilder.execute(this)
             val resultList = results.map {
-                it.userTotals.userName to (it.userTotals.totalCost as? Number)?.toInt()
-            }.toList().sortedBy { it.first }
+                (it.userTotals.orderUserName as? String ?: "") to it.userTotals.totalCost?.toInt()
+            }.toList().sortedBy { it.first as String }
 
             assertEquals(3, resultList.size, "Should have 3 users")
             assertEquals("alice" to 1050, resultList[0])
@@ -81,15 +82,15 @@ class SubqueryTests : DatabaseTest() {
         withConnection {
             // Inline subquery with filter and marker token parameter API
             val queryBuilder = fromAliased(ExpensiveOrders) {
-                    from(Order)
-                        .select { order.userName }
-                        .select { order.product }
-                        .where { order.cost gte 500 }
-                }
+                from(Order)
+                    .selectAs(OrderUserName) { order.userName }
+                    .selectAs(OrderProduct) { order.product }
+                    .where { order.cost gte 500 }
+            }
                 .selectAll(ExpensiveOrders)  // Direct parameter - no lambda!
 
             val results = queryBuilder.execute(this)
-            val products = results.map { it.expensiveOrders.product as String }.toList()
+            val products = results.map { it.expensiveOrders.orderProduct as String }.toList()
 
             assertEquals(1, products.size, "Should have 1 expensive order")
             assertEquals("Laptop", products[0])
@@ -111,10 +112,11 @@ class SubqueryTests : DatabaseTest() {
         withConnection {
             // Inline subquery with .aliasAs<T>() in join
             val queryBuilder = from(Person)
-                .joinAliased(from(Order)
-                    .select { order.userName }
-                    .build()
-                    .aliasAs<UsersWithOrders>()) { person.name eq this.usersWithOrders.userName }
+                .joinAliased(
+                    from(Order)
+                        .selectAs(OrderUserName) { order.userName }
+                        .build()
+                        .aliasAs<UsersWithOrders>()) { person.name eq this.usersWithOrders.orderUserName }
                 .selectAll(Person)
                 .selectAll(UsersWithOrders)  // Direct parameter - no lambda!
 
@@ -144,11 +146,13 @@ class SubqueryTests : DatabaseTest() {
         withConnection {
             // Inline subquery with .aliasAs<T>() in left join
             val queryBuilder = from(Person)
-                .leftJoinAliased(from(Order)
-                    .select { order.userName }
-                    .selectAliased(OrderCount) { count(order.id) }
-                    .build()
-                    .aliasAs<OrderCounts>()) { person.name eq this.orderCounts.userName }
+                .leftJoinAliased(
+                    from(Order)
+                        .selectAs(OrderUserName) { order.userName }
+                        .selectAs(OrderCount) { count(order.id) }
+                        .groupBy { order.userName }
+                        .build()
+                        .aliasAs<OrderCounts>()) { person.name eq this.orderCounts.orderUserName }
                 .selectAll(Person)
                 .selectAll(OrderCounts)  // Direct parameter - no lambda!
 
@@ -182,7 +186,7 @@ class SubqueryTests : DatabaseTest() {
         withConnection {
             // Create scalar subquery for average cost
             val avgCostQuery = from(Order)
-                .selectAliased(AvgCost) { avg(order.cost) }
+                .selectAs(AvgCost) { avg(order.cost) }
                 .build()
 
             // Find orders more expensive than average
@@ -219,7 +223,7 @@ class SubqueryTests : DatabaseTest() {
             // Find people whose age matches an order cost
             // REQUIRES CORRELATED SUBQUERY SUPPORT
             val orderCostQuery = from(Order)
-                .select { order.cost }
+                .selectAs(OrderCost) { order.cost }
                 //.where { order.userName eq person.name }  // Correlated - references outer table
                 .build()
 
@@ -253,7 +257,7 @@ class SubqueryTests : DatabaseTest() {
             // Find people who have at least one order
             // REQUIRES CORRELATED SUBQUERY SUPPORT
             val hasOrdersQuery = from(Order)
-                .select { order.id }
+                .selectAs(OrderProduct) { order.id }
                 //.where { order.userName eq person.name }  // Correlated - references outer table
                 .build()
 
@@ -287,7 +291,7 @@ class SubqueryTests : DatabaseTest() {
             // Find people who have NO orders
             // REQUIRES CORRELATED SUBQUERY SUPPORT
             val hasOrdersQuery = from(Order)
-                .select { order.id }
+                .selectAs(OrderProduct) { order.id }
                 //.where { order.userName eq person.name }  // Correlated - references outer table
                 .build()
 
@@ -323,17 +327,17 @@ class SubqueryTests : DatabaseTest() {
             // Find people who have expensive orders (cost > 500)
             // REQUIRES CORRELATED SUBQUERY SUPPORT
             val hasExpensiveOrdersQuery = from(Order)
-                .select { order.id }
+                .selectAs(OrderProduct) { order.id }
                 //.where { (order.userName eq person.name) and (order.cost gt 500) }  // Correlated - references outer table
                 .where { order.cost gt 500 }  // Non-correlated version for compilation
                 .build()
 
-            val queryBuilder = from(Person)
+            val results = from(Person)
                 .selectAll(Person)
                 .where { exists(hasExpensiveOrdersQuery) }
+                .execute(this)
 
-            val results = queryBuilder.execute(this)
-            val names = results.map { it.person.name as String }.toList()
+            val names = results.map { it.person.name }.toList()
 
             assertEquals(1, names.size, "Should have 1 person with expensive orders")
             assertEquals("alice", names[0])

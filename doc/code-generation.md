@@ -176,15 +176,15 @@ Kodama uses a marker interface pattern for type-safe aggregate selections:
 **Your Query:**
 ```kotlin
 from(Order)
-    .selectAliased(TotalRevenue) { sum(order.cost) }
-    .selectAliased(OrderCount) { count(order.id) }
+    .selectAs(TotalRevenue) { sum(order.cost) }
+    .selectAs(OrderCount) { count(order.id) }
 ```
 
 **How Markers Work:**
-1. Generator scans test files for `.selectAliased(MarkerName)` patterns
+1. Generator scans test files for `.selectAs(MarkerName)` patterns
 2. Extracts marker names and tracks which tables they're used with
 3. Generates marker interfaces automatically
-4. Only generates `selectAliased()` methods for table+marker combinations that are actually used
+4. Only generates `selectAs()` methods for table+marker combinations that are actually used
 
 **Generated Marker Interfaces:**
 ```kotlin
@@ -199,16 +199,16 @@ interface OrderCount<out T> {
 }
 ```
 
-**Generated selectAliased() Methods:**
+**Generated selectAs() Methods:**
 ```kotlin
 // Only generated for Order+TotalRevenue since that's what tests use
-fun <OrderSel> AfterFromQueryBuilder_Order<OrderSel>.selectAliased(
+fun <OrderSel> AfterFromQueryBuilder_Order<OrderSel>.selectAs(
     marker: TotalRevenue<Number>,
     block: SelectContext_Order.() -> AggregateFunction<*>
 ): SelectionResult_Order_TotalRevenue
 
 // Only generated for Order+OrderCount since that's what tests use
-fun <OrderSel> AfterFromQueryBuilder_Order<OrderSel>.selectAliased(
+fun <OrderSel> AfterFromQueryBuilder_Order<OrderSel>.selectAs(
     marker: OrderCount<Long>,
     block: SelectContext_Order.() -> AggregateFunction<*>
 ): SelectionResult_OrderCount
@@ -388,8 +388,8 @@ Kodama generates chainable `groupBy()` methods for explicit grouping:
 **Your Query:**
 ```kotlin
 from(Order)
-    .select { order.userName }
-    .selectAliased(OrderCount) { count(order.id) }
+    .selectAs(OrderUserName) { order.userName }
+    .selectAs(OrderCount) { count(order.id) }
     .groupBy { order.userName }
 ```
 
@@ -451,11 +451,11 @@ val queryChainPattern = """from\s*\([^)]+\)(?:\s*\.join\s*\([^)]+\)(?:\s*\{[^}]*
 
 ### Marker Discovery
 
-Generator scans test files for aggregate marker usage:
+Generator scans test files for marker-based selection usage:
 
 ```kotlin
-// Finds: .selectAliased(MarkerName) { ... }
-val markerPattern = """\.selectAliased\s*\(\s*([A-Z]\w+)\s*\)""".toRegex()
+// Finds: .selectAs(MarkerName) { ... }
+val markerPattern = """\.selectAs\s*\(\s*([A-Z]\w+)\s*\)""".toRegex()
 
 // Also scans inside subquery blocks
 val subqueryPattern = """(?:fromAliased|joinAliased|leftJoinAliased)\s*\([A-Z]\w+\)\s*\{...\}""".toRegex()
@@ -463,9 +463,10 @@ val subqueryPattern = """(?:fromAliased|joinAliased|leftJoinAliased)\s*\([A-Z]\w
 
 **Marker Tracking:**
 - Tracks which markers are used with which table combinations
-- Only generates `selectAliased()` methods for actually-used combinations
-- Example: If TotalRevenue is only used with Order table, only generates `AfterFromQueryBuilder_Order.selectAliased(TotalRevenue)`
+- Only generates `selectAs()` methods for actually-used combinations
+- Example: If TotalRevenue is only used with Order table, only generates `AfterFromQueryBuilder_Order.selectAs(TotalRevenue)`
 - Optimizes generated code size by avoiding unnecessary methods
+- Works for columns, aggregates, and expressions with the same unified API
 
 ### Combination Generation
 
@@ -649,6 +650,6 @@ Key steps:
 1. Scan schema files for table definitions
 2. Scan test files for query patterns and marker usage
 3. Extract table combinations and marker-table associations
-4. Generate type-safe extension functions (from, join, select, selectAliased, orderBy, groupBy)
+4. Generate type-safe extension functions (from, join, select, selectAs, orderBy, groupBy)
 5. Generate marker interfaces and result classes
 6. Output to `build/generated/kodama/`

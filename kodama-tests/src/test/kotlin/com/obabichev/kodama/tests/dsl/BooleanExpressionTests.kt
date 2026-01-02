@@ -305,7 +305,7 @@ class BooleanExpressionTests : DatabaseTest() {
 
         withConnection {
             from(Person)
-                .selectAliased(IsOld) { person.age gt 100 }
+                .selectAs(IsOld) { person.age gt 100 }
                 .execute(this)
         }
     }

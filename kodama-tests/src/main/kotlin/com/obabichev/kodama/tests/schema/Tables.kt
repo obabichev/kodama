@@ -227,3 +227,8 @@ object SmallSerialTest : Table("smallserial_test") {
     val id = smallserial("id").primaryKey()
     val tag = varchar("tag", 50)
 }
+
+object Org : Table("org") {
+    val id = integer("id").primaryKey()
+    val name = varchar("name", 100)
+}

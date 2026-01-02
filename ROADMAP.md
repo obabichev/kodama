@@ -22,8 +22,8 @@ Filter aggregate results (works with GROUP BY):
 
 ```kotlin
 from(Order)
-    .select { order.userName }
-    .selectAliased(OrderCount) { count(order.id) }
+    .selectAs(OrderUserName) { order.userName }
+    .selectAs(OrderCount) { count(order.id) }
     .groupBy { order.userName }
     .having { count(order.id) gt 5 }
     .execute(transaction)
@@ -113,13 +113,13 @@ Remove duplicates from query results:
 ```kotlin
 from(Person)
     .distinct()
-    .select { person.name }
+    .selectAs(PersonName) { person.name }
 
 // DISTINCT ON (PostgreSQL specific)
 from(Order)
     .distinctOn { order.userName }
-    .select { order.userName }
-    .select { order.product }
+    .selectAs(UserName) { order.userName }
+    .selectAs(Product) { order.product }
 ```
 
 **Implementation Tasks:**
@@ -140,8 +140,8 @@ Conditional logic in SELECT clauses:
 
 ```kotlin
 from(Person)
-    .select { person.name }
-    .selectAliased(AgeGroup) {
+    .selectAs(PersonName) { person.name }
+    .selectAs(AgeGroup) {
         case()
             .when {
                 person.age lt 18
@@ -154,8 +154,8 @@ from(Person)
 
 // With numeric results
 from(Order)
-    .select { order.product }
-    .selectAliased(DiscountedPrice) {
+    .selectAs(Product) { order.product }
+    .selectAs(DiscountedPrice) {
         case()
             .when {
                 order.cost gt 1000
@@ -191,8 +191,8 @@ WITH clause for named subqueries (CTEs):
 // Define CTE
 val highValueOrders = cte("high_value_orders") {
     from(Order)
-        .select { order.userName }
-        .select { order.cost }
+        .selectAs(UserName) { order.userName }
+        .selectAs(Cost) { order.cost }
         .where { order.cost gt 1000 }
 }
 
@@ -200,8 +200,8 @@ val highValueOrders = cte("high_value_orders") {
 with(highValueOrders)
     .from(Person)
     .join(highValueOrders) { highValueOrders.userName eq person.name }
-    .select { person.name }
-    .select { highValueOrders.cost }
+    .selectAs(PersonName) { person.name }
+    .selectAs(OrderCost) { highValueOrders.cost }
 
 // Multiple CTEs
 val recentOrders = cte("recent") { /* query */ }
@@ -210,7 +210,7 @@ val topCustomers = cte("top_customers") { /* query */ }
 with(recentOrders, topCustomers)
     .from(recentOrders)
     .join(topCustomers) { /* join condition */ }
-    .select { /* ... */ }
+    .selectAs(ResultField) { /* field selection */ }
 ```
 
 **Important Notes:**
@@ -241,10 +241,10 @@ Combine multiple query results with set operations:
 ```kotlin
 // UNION - combine results, remove duplicates
 val query1 = from(Person)
-    .select { person.name }
+    .selectAs(Name) { person.name }
 
 val query2 = from(Company)
-    .select { company.companyName }
+    .selectAs(Name) { company.companyName }
 
 val combined = query1.union(query2)
 
@@ -259,10 +259,10 @@ query1.except(query2)
 
 // Type coercion for compatible types
 val numericQuery1 = from(Order)
-    .select { order.cost }  // Int
+    .selectAs(Amount) { order.cost }  // Int
 
 val numericQuery2 = from(Product)
-    .select { product.price }  // BigDecimal
+    .selectAs(Amount) { product.price }  // BigDecimal
 
 // Kodama coerces Int to BigDecimal
 numericQuery1.union(numericQuery2)  // Result type: BigDecimal
@@ -312,9 +312,9 @@ from(Person)
                 .limit(3)
         }
     )
-    .select { person.name }
-    .select { order.product }
-    .select { order.cost }
+    .selectAs(PersonName) { person.name }
+    .selectAs(Product) { order.product }
+    .selectAs(Cost) { order.cost }
 ```
 
 ---
@@ -328,9 +328,9 @@ ROW_NUMBER, RANK, LAG, LEAD, etc.:
 
 ```kotlin
 from(Order)
-    .select { order.product }
-    .select { order.cost }
-    .selectAliased(RowNum) {
+    .selectAs(Product) { order.product }
+    .selectAs(Cost) { order.cost }
+    .selectAs(RowNum) {
         rowNumber().over {
             partitionBy { order.userName }
             orderBy { order.cost.desc() }

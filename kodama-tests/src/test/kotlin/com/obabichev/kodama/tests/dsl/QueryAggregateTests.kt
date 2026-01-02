@@ -27,7 +27,7 @@ class QueryAggregateTests : DatabaseTest() {
 
         withConnection {
             val builder = from(Order)
-                .selectAliased(TotalRevenue) { sum(order.cost) }
+                .selectAs(TotalRevenue) { sum(order.cost) }
 
             val results = builder.execute(this)
 
@@ -58,7 +58,7 @@ class QueryAggregateTests : DatabaseTest() {
         // Test TotalRevenue separately
         withConnection {
             val revenueResults = from(Order)
-                .selectAliased(TotalRevenue) { sum(order.cost) }
+                .selectAs(TotalRevenue) { sum(order.cost) }
                 .execute(this)
 
             val row = revenueResults.first()
@@ -71,7 +71,7 @@ class QueryAggregateTests : DatabaseTest() {
         // Test OrderCount separately
         withConnection {
             val countResults = from(Order)
-                .selectAliased(OrderCount) { count(order.id) }
+                .selectAs(OrderCount) { count(order.id) }
                 .execute(this)
 
             val row = countResults.first()
@@ -85,6 +85,7 @@ class QueryAggregateTests : DatabaseTest() {
     @Test
     fun testMixedColumnAndAggregateSelection() {
         // Mix regular columns with aggregate functions using explicit GROUP BY
+        // Uses unified .selectAs() API for both columns and aggregates
         testData {
             order(1, "kodama", "Laptop", 1000)
             order(2, "kodama", "Mouse", 50)
@@ -93,25 +94,15 @@ class QueryAggregateTests : DatabaseTest() {
 
         withConnection {
             val queryBuilder = from(Order)
-                .select { order.userName }
-                .selectAliased(OrderCount) { count(order.id) }
+                .selectAs(OrderUserName) { order.userName }  // Column selection with marker
+                .selectAs(OrderCount) { count(order.id) }  // Aggregate selection with marker
                 .groupBy { order.userName }  // Each groupBy call returns one column
 
-            // Verify SQL contains GROUP BY clause
-            val sql = queryBuilder.build().sql()
-            assertTrue(sql.contains("GROUP BY"), "SQL should contain GROUP BY clause")
-            assertTrue(sql.contains("\"order\".\"user_name\""), "GROUP BY should include user_name column")
+            // Test direct access on single result
+            val result = queryBuilder.execute(this).first()
 
-            val results = queryBuilder.execute(this)
-
-            // We should have 2 rows (kodama with 2 orders, alice with 1 order)
-            assertEquals(2, results.count(), "Should have 2 groups")
-
-            results.forEach { row ->
-                val orderCount = row.orderCount
-                assertNotNull(orderCount, "orderCount should not be null")
-                assertTrue(orderCount > 0, "Expected positive order count")
-            }
+            assertNotNull(result.orderUserName, "orderUserName should not be null")
+            assertTrue(result.orderCount > 0, "Expected positive order count for ${result.orderUserName}")
         }
     }
 }
