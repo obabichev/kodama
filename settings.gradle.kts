@@ -3,6 +3,7 @@ enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 
 include("kodama-core")
+include("kodama-ksp-processor")
 include("kodama-tests")
 
 pluginManagement {

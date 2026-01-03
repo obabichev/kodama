@@ -1,12 +1,14 @@
 plugins {
     kotlin("jvm") apply true
+    alias(libs.plugins.ksp)
     id("com.obabichev.kodama")
 }
 
 kotlin {
     jvmToolchain(17)
     compilerOptions {
-        freeCompilerArgs.add("-Xcontext-parameters")
+        // Context parameters require Kotlin 2.2+
+        // freeCompilerArgs.add("-Xcontext-parameters")
     }
 }
 
@@ -21,6 +23,7 @@ dependencies {
     implementation(kotlin("test-junit"))
 
     implementation(project(":kodama-core"))
+    ksp(project(":kodama-ksp-processor"))
 
     implementation(libs.slf4j)
     implementation(libs.log4j.slf4j.impl)

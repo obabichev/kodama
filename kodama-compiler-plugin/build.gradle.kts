@@ -5,6 +5,7 @@ import java.util.Properties
 plugins {
     kotlin("jvm") version "2.1.0"
     kotlin("kapt") version "2.1.0"
+    kotlin("plugin.serialization") version "2.1.0"
     `java-gradle-plugin`
     `maven-publish`
     signing
@@ -35,6 +36,12 @@ dependencies {
     // Auto-service for plugin registration
     kapt("com.google.auto.service:auto-service:1.1.1")
     compileOnly("com.google.auto.service:auto-service-annotations:1.1.1")
+
+    // JSON parsing for KSP metadata
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+
+    // Kotlin reflection for runtime metadata extraction
+    implementation("org.jetbrains.kotlin:kotlin-reflect")
 
     // Test dependencies (currently no tests)
     testImplementation(kotlin("test-junit"))

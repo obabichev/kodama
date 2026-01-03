@@ -129,7 +129,7 @@ class QuerySimpleDataClassTests : DatabaseTest() {
 
         withConnection {
             val results = from(Person)
-                .join(Order, type = JoinType.INNER) {
+                .join(Order) {
                     order.userName eq person.name
                 }
                 .selectAll(Person)

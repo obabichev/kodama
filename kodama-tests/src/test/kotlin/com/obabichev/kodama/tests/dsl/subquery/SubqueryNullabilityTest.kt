@@ -31,6 +31,7 @@ class SubqueryNullabilityTest : DatabaseTest() {
                     .selectAs(OrderUserName) { order.userName }
                     .selectAs(MyAlias) { sum(order.cost) }
                     .groupBy { order.userName }
+                    .build()
             }
                 .selectAll(UserTotalsNew)  // Direct parameter - no lambda!
                 .execute(this)
@@ -64,6 +65,7 @@ class SubqueryNullabilityTest : DatabaseTest() {
                     .selectAs(OrderUserName) { order.userName }
                     .selectAs(MyAlias) { sum(order.cost) }
                     .groupBy { order.userName }
+                    .build()
             }
                 .selectAll(UserTotalsNew)  // Direct parameter - no lambda!
                 .execute(this)

@@ -26,24 +26,63 @@ object Person : Table("person") {
 data class Person(...)
 ```
 
-### 2. Code Generation Approach
+### 2. Code Generation Approach (Hybrid KSP + Runtime Reflection)
 
-- **Generator scans test files** for query patterns to discover table combinations
-- **Generates type-safe builders** for each combination (Person, Person+Order, Person+Order+Profile)
-- Generated code is in: `build/generated/kodama/com/obabichev/kodama/tests/data/QueryExtensions.kt`
-- Generator task: `generateKodamaExtensions`
-- Scans test files for `from(...).join(...)` patterns
+Kodama uses a **hybrid approach** for code generation:
 
-### 3. No Reflection
+1. **KSP (Kotlin Symbol Processing)** - Discovers table definitions at compile-time
+   - Finds `object X : Table(...)` declarations
+   - Outputs: `build/generated/ksp/main/resources/kodama-ksp-metadata.json`
+   - Type-safe, handles custom Table subclasses automatically
 
-All type safety comes from generated code, not runtime reflection. The `RelationsContainer` was simplified to work directly with Table objects.
+2. **Runtime Reflection** - Extracts column metadata after compilation
+   - Loads compiled Table classes via URLClassLoader
+   - Accesses `Table.relation.columns` to get DSL results
+   - Extracts: SQL names, types, nullability, auto-generation flags
+   - Files: `RuntimeMetadataExtractor.kt`, `KspMetadataLoader.kt`
+
+3. **Regex Pattern Scanning** - Discovers query usage patterns in test files
+   - Scans test files for `from(...).join(...)` patterns
+   - Finds `.selectAs(Marker)` patterns
+   - Finds `fromAliased()` subquery definitions
+   - Pattern-driven: Only generates code for table combinations actually used
+
+**Key Files:**
+- KSP Processor: `kodama-ksp-processor/src/main/kotlin/com/obabichev/kodama/ksp/KodamaSymbolProcessor.kt`
+- Runtime Extractor: `kodama-compiler-plugin/src/main/kotlin/com/obabichev/kodama/compiler/metadata/RuntimeMetadataExtractor.kt`
+- Main Generator: `kodama-compiler-plugin/src/main/kotlin/com/obabichev/kodama/compiler/KodamaTableBasedCodegenTask.kt`
+- Generated Output: `build/generated/kodama/{package}/QueryExtensions.kt`
+- Generator Task: `generateKodamaExtensions`
+
+**Task Dependency Chain:**
+```
+kspKotlin → compileKotlin → generateKodamaExtensions → compileTestKotlin
+```
+
+### 3. No Reflection at Runtime
+
+All type safety comes from generated code, not runtime reflection. Runtime reflection is only used **during code generation itself** to extract column metadata from compiled Table classes. The `RelationsContainer` was simplified to work directly with Table objects.
 
 ## Project Structure
 
 ```
 kodama/
 ├── kodama-core/              # Core library (Table, Column, Query, etc.)
+├── kodama-ksp-processor/     # KSP processor for table discovery
+│   └── src/main/kotlin/
+│       └── com/obabichev/kodama/ksp/
+│           ├── KodamaSymbolProcessor.kt      # KSP table discovery
+│           ├── KodamaSymbolProcessorProvider.kt
+│           └── model/KspTableModel.kt        # KSP metadata models
 ├── kodama-compiler-plugin/   # Gradle plugin with code generator
+│   └── src/main/kotlin/
+│       └── com/obabichev/kodama/compiler/
+│           ├── KodamaGradlePlugin.kt         # Gradle plugin entry point
+│           ├── KodamaTableBasedCodegenTask.kt # Main code generation task
+│           └── metadata/
+│               ├── MetadataModels.kt          # Metadata data classes
+│               ├── KspMetadataLoader.kt       # JSON loader
+│               └── RuntimeMetadataExtractor.kt # Runtime reflection
 ├── kodama-tests/            # Tests and example usage
 │   ├── src/main/kotlin/
 │   │   └── schema/Tables.kt  # Table definitions (Person, Order, Profile, Company)
@@ -53,6 +92,7 @@ kodama/
 │   ├── README.md
 │   ├── getting-started.md
 │   └── code-generation.md
+├── CODE_GENERATION.md       # Detailed code generation architecture
 ├── README.md               # Main project README
 └── ROADMAP.md             # Feature roadmap
 ```
@@ -64,14 +104,25 @@ kodama/
 
 Contains: Person, Order, Profile, Company table objects
 
-### Code Generator
-**Location**: `kodama-compiler-plugin/src/main/kotlin/com/obabichev/kodama/compiler/KodamaTableBasedCodegenTask.kt`
+### Code Generator (Hybrid Approach)
+
+**Main Task**: `kodama-compiler-plugin/src/main/kotlin/com/obabichev/kodama/compiler/KodamaTableBasedCodegenTask.kt`
 
 Key logic:
-- Scans schema files for `object X : Table(...)` patterns
-- Scans test files for `from(...).join(...)` patterns
-- Generates all prefix combinations for multi-join support
-- Outputs to `build/generated/kodama/`
+1. **Loads KSP metadata** - Reads JSON file produced by KodamaSymbolProcessor
+2. **Extracts runtime metadata** - Uses RuntimeMetadataExtractor to load compiled Table classes and access column metadata via reflection
+3. **Scans test files** - Uses regex to find query patterns (`from(...).join(...)`, `.selectAs(Marker)`, subqueries)
+4. **Generates code** - Creates type-safe query builders, result classes, and INSERT methods
+5. **Outputs to** `build/generated/kodama/`
+
+**KSP Processor**: `kodama-ksp-processor/src/main/kotlin/com/obabichev/kodama/ksp/KodamaSymbolProcessor.kt`
+- Discovers `object X : Table(...)` and `object Y : EntityTable<T>(...)` declarations
+- Outputs `kodama-ksp-metadata.json` with table names and qualified class names
+
+**Runtime Metadata**: `kodama-compiler-plugin/src/main/kotlin/com/obabichev/kodama/compiler/metadata/RuntimeMetadataExtractor.kt`
+- Loads compiled Table classes via URLClassLoader
+- Accesses `Table.relation.columns` via reflection
+- Extracts SQL names, Kotlin types, nullability, and auto-generation flags
 
 ### Core Query Building
 **Location**: `kodama-core/src/main/kotlin/com/obabichev/kodama/query/`
@@ -267,30 +318,77 @@ row.order.cost    // Access order's cost
 
 ## Major Refactoring History
 
-### Last Major Change: Data Classes → Object-Based Tables
+### Latest: Modular Generator Architecture (v0.4.0 - January 2026)
+
+**What changed**:
+- Refactored from single 242 KB monolithic file to 987 fine-grained generators
+- Implemented two-phase code generation (structure-driven + pattern-driven)
+- Added phantom type parameters for compile-time selection tracking
+- Introduced SqlAliasStyle for configurable SQL naming conventions
+- Removed ~470 KB of legacy code
+
+**Key improvements**:
+- ✅ 80+ focused generator classes (vs 1 monolithic file)
+- ✅ Each generator ~50-150 lines (vs 4,000+ line monolith)
+- ✅ Independently testable components
+- ✅ Clear separation: data, transform, generate layers
+- ✅ 100% test compatibility maintained (149 tests passing)
+
+**Architecture**:
+```
+kodama-compiler-plugin/
+├── GenerateTableMetadataTask.kt      # Phase 1: Structure-driven
+├── GenerateQueryExtensionsTask.kt    # Phase 2: Pattern-driven
+├── data/                              # Structured data (TableInfo, etc.)
+├── transform/                         # DataTransformer
+└── generator/
+    ├── CodeGenerator.kt               # Interface
+    ├── FileGenerator.kt               # Orchestrator
+    ├── GeneratorFactory.kt            # Creates 987 generators
+    ├── markers/                       # 12 generators
+    ├── accessors/                     # 18 generators
+    ├── contexts/                      # 6 generators
+    ├── builders/                      # 10 generators
+    ├── extensions/                    # 24 generators
+    └── results/                       # 8 generators
+```
+
+**See**: [Refactoring Summary](doc/REFACTORING_SUMMARY.md) for complete details
+
+### Previous: Data Classes → Object-Based Tables
 
 **What changed**:
 - Removed `@Table` and `@Column` annotations
 - Changed from `data class` to `object : Table(...)`
 - Removed reflection from `RelationsContainer`
 - Changed from `.from(Person::class)` to `.from(Person)`
-- Removed old `execute(query, klass)` method
-- Updated all tests to use new syntax
-
-**Files affected**:
-- Deleted old data class files (Person.kt, Order.kt, etc. in tests/data/)
-- Created new Tables.kt in tests/schema/
-- Updated RelationsContainer.kt
-- Updated KodamaTableBasedCodegenTask.kt
-- Changed column types to objects (IntColumnType, StringColumnType)
 
 ## Code Generation Process
 
-1. **Scan**: Generator finds table definitions and query patterns using regex
-2. **Extract**: Extracts table combinations from queries
-3. **Generate Combinations**: Creates all prefixes (Person, Person+Order, Person+Order+Profile)
-4. **Generate Code**: Creates accessors, builders, contexts, and result classes
-5. **Output**: Writes to `build/generated/kodama/`
+### Two-Phase Architecture
+
+#### Phase 1: Structure-Driven (`GenerateTableMetadataTask`)
+1. **Load KSP Metadata**: Read table definitions from JSON
+2. **Extract Runtime Metadata**: Compile-time reflection on Table objects
+3. **Generate TableMetadata.kt**: Metadata classes for all tables
+4. **Output**: `build/generated/kodama/TableMetadata.kt`
+
+#### Phase 2: Pattern-Driven (`GenerateQueryExtensionsTask`)
+1. **Scan Test Files**: Find query patterns using regex
+2. **Discover Combinations**: Extract table combinations (Person, Person+Order, etc.)
+3. **Discover Markers**: Find selection markers (TotalRevenue, PersonName, etc.)
+4. **Transform to Structured Data**: Convert raw maps to type-safe data classes
+5. **Create Generators**: Factory creates 987 fine-grained generators
+6. **Generate Code**: Each generator creates its specific construct
+7. **Orchestrate Output**: FileGenerator combines all with imports
+8. **Output**: `build/generated/kodama/QueryExtensions.kt`
+
+**Key Components**:
+- **Data Layer**: TableInfo, ColumnInfo, MarkerInfo (type-safe metadata)
+- **Transform Layer**: DataTransformer (raw maps → structured data)
+- **Generator Layer**: 80+ generator classes implementing CodeGenerator interface
+- **Factory**: GeneratorFactory creates all generators in correct order
+- **Orchestrator**: FileGenerator combines generators with imports and package
 
 ## Testing Database
 
@@ -333,13 +431,21 @@ Tests use PostgreSQL with test data:
 
 ## Key Principles for Claude
 
-1. **Never use reflection** - All type safety comes from generated code
-2. **Tables are objects** - Not data classes, not classes
-3. **Query patterns drive generation** - Generator scans test files
-4. **Maintain type safety** - Every operation must be type-checked at compile time
-5. **Follow existing patterns** - Look at QuerySimpleDataClassTests.kt for examples
-6. **Keep documentation minimal** - Only getting-started.md and code-generation.md
-7. **Reference ROADMAP.md** - For planned features and priorities
+1. **🚫 NO GIT MANIPULATIONS** - Claude is **STRICTLY FORBIDDEN** to:
+   - Make commits (`git commit`)
+   - Change branches (`git checkout`, `git switch`)
+   - Create branches (`git branch`)
+   - Push to remote (`git push`)
+   - Modify git state in ANY way
+   - **ONLY ALLOWED**: Read git history (`git log`, `git status`, `git diff` - read-only operations)
+   - **ALWAYS** stage changes with `git add` and let the USER make commits manually
+2. **Never use reflection** - All type safety comes from generated code
+3. **Tables are objects** - Not data classes, not classes
+4. **Query patterns drive generation** - Generator scans test files
+5. **Maintain type safety** - Every operation must be type-checked at compile time
+6. **Follow existing patterns** - Look at QuerySimpleDataClassTests.kt for examples
+7. **Keep documentation minimal** - Only getting-started.md and code-generation.md
+8. **Reference ROADMAP.md** - For planned features and priorities
 
 ## Quick Reference Links
 
