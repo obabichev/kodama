@@ -44,7 +44,7 @@ import java.time.OffsetTime
  * in FROM and JOIN clauses.
  */
 abstract class Table(tableName: String) : TableSource {
-    val relation: Relation = Relation(tableName)
+    open val relation: Relation = Relation(tableName)
 
     init {
         // Register this table globally

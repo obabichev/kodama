@@ -79,11 +79,19 @@ infix fun com.obabichev.kodama.components.Column<*>.gte(expression: com.obabiche
 }
 
 /**
- * Infix eq operator for Column to Column - used in typed join conditions
- * Returns a Pair of columns for join condition
+ * Infix eq operator for Column to Column - used in both join conditions and WHERE clauses
+ * Returns an Expression that can be used in both JOIN ON and WHERE conditions
  */
-infix fun com.obabichev.kodama.components.Column<*>.eq(other: com.obabichev.kodama.components.Column<*>): Pair<com.obabichev.kodama.components.Column<*>, com.obabichev.kodama.components.Column<*>> {
-    return this to other
+infix fun com.obabichev.kodama.components.Column<*>.eq(other: com.obabichev.kodama.components.Column<*>): Expression {
+    return BinaryOperand("=", ColumnExpression(this), ColumnExpression(other))
+}
+
+/**
+ * Infix eq operator for Column to Expression - allows comparing columns with scalar subqueries, etc.
+ * Returns an Expression that can be used in WHERE conditions
+ */
+infix fun com.obabichev.kodama.components.Column<*>.eq(expression: com.obabichev.kodama.components.expression.Expression): Expression {
+    return BinaryOperand("=", ColumnExpression(this), expression)
 }
 
 /**
@@ -144,13 +152,20 @@ infix fun <T, TM, CM> com.obabichev.kodama.components.TypedColumn<T, TM, CM>.gte
 }
 
 /**
- * Infix eq operator for TypedColumn to TypedColumn - used in typed join conditions
- * Unwraps the underlying Columns and returns a Pair for join condition
+ * Infix eq operator for TypedColumn to TypedColumn - used in both join conditions and WHERE clauses
+ * Unwraps the underlying Columns and returns an Expression
  */
 infix fun <T1, TM1, CM1, T2, TM2, CM2> com.obabichev.kodama.components.TypedColumn<T1, TM1, CM1>.eq(
     other: com.obabichev.kodama.components.TypedColumn<T2, TM2, CM2>
-): Pair<com.obabichev.kodama.components.Column<*>, com.obabichev.kodama.components.Column<*>> {
-    return this.column to other.column
+): Expression {
+    return this.column.eq(other.column)
+}
+
+/**
+ * Infix eq operator for TypedColumn to Expression - allows comparing columns with scalar subqueries, etc.
+ */
+infix fun <T, TM, CM> com.obabichev.kodama.components.TypedColumn<T, TM, CM>.eq(expression: com.obabichev.kodama.components.expression.Expression): Expression {
+    return this.column.eq(expression)
 }
 
 // ========== Range Operators ==========

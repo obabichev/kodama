@@ -429,25 +429,225 @@ fun <OrderSel, AC : AggCount> AfterFromQueryBuilder_Order<OrderSel, AC>.groupBy(
 - Required when mixing regular columns with aggregates
 - Not needed for aggregates-only queries
 
-## How Scanning Works
+### 7. Correlated Subquery Methods
 
-### Table Discovery
+Kodama generates helper functions for correlated subqueries in WHERE clauses. Correlated subqueries allow inner queries to reference columns from the outer query.
 
-Generator uses regex to find table definitions:
-
+**Your Query:**
 ```kotlin
-// Finds: object Person : Table("person") { ... }
-val tablePattern = """object\s+(\w+)\s*:\s*Table\s*\([^)]*\)\s*\{([^}]*)\}""".toRegex()
+from(Person)
+    .selectAll(Person)
+    .where {
+        val outerPerson = person  // Capture outer context BEFORE lambda
+        exists {
+            from(Order)
+                .selectAll(Order)
+                .where { order.userName eq outerPerson.name }  // Reference outer table
+                .build()
+        }
+    }
 ```
 
-### Query Pattern Discovery
+**Generated Helpers in WhereContext:**
+```kotlin
+class WhereContext_Person(private val state: QueryState) {
+    val person = PersonAccessor(state.relations.relation(Person))
 
-Generator scans test files for query chains:
+    // Correlated subquery support - allows inner query to reference outer tables
+    // The lambda does NOT have receiver type, so inner queries can use their own builder methods
+    // Capture outer context variables before building inner query
+    fun exists(block: () -> com.obabichev.kodama.query.Query): Expression {
+        val query = block()
+        return ExistsExpression(query)
+    }
+
+    fun notExists(block: () -> com.obabichev.kodama.query.Query): Expression {
+        val query = block()
+        return NotExistsExpression(query)
+    }
+
+    fun scalarSubquery(block: () -> com.obabichev.kodama.query.Query): Expression {
+        val query = block()
+        return ScalarSubqueryExpression(query)
+    }
+}
+```
+
+**Three Helper Functions:**
+
+1. **exists()** - Checks if subquery returns any rows:
+```kotlin
+from(Person)
+    .selectAll(Person)
+    .where {
+        val outerPerson = person
+        exists {
+            from(Order)
+                .selectAll(Order)
+                .where { order.userName eq outerPerson.name }
+                .build()
+        }
+    }
+// Finds people who have at least one order
+```
+
+2. **notExists()** - Checks if subquery returns no rows:
+```kotlin
+from(Person)
+    .selectAll(Person)
+    .where {
+        val outerPerson = person
+        notExists {
+            from(Order)
+                .selectAll(Order)
+                .where { order.userName eq outerPerson.name }
+                .build()
+        }
+    }
+// Finds people who have NO orders
+```
+
+3. **scalarSubquery()** - Compares against a single value from subquery:
+```kotlin
+from(Order)
+    .selectAll(Order)
+    .where {
+        order.cost gt scalarSubquery(avgCostQuery)
+    }
+// Finds orders more expensive than average
+```
+
+**Key Design Patterns:**
+
+**1. Capture Outer Context First:**
+```kotlin
+.where {
+    val outerPerson = person  // Capture BEFORE lambda
+    exists {
+        // Inner query can now reference outerPerson
+        from(Order).where { order.userName eq outerPerson.name }
+    }
+}
+```
+
+**2. Use eq for Column-to-Column Comparison:**
+```kotlin
+// ✅ Column-to-column comparison in WHERE clauses
+order.userName eq outerPerson.name
+
+// ✅ Column-to-column comparison in JOIN conditions
+join(Order) { order.userName eq person.name }
+
+// ✅ Column to scalar subquery comparison
+person.age eq scalarSubquery(costQuery)
+```
+
+**3. Lambda Has No Receiver Type:**
+The helper lambdas use `() -> Query` (not `WhereContext.() -> Query`) so inner queries can use their own builder methods:
+```kotlin
+exists {
+    from(Order)            // Inner query's from()
+        .selectAll(Order)  // Inner query's selectAll()
+        .where { ... }     // Inner query's where()
+        .build()
+}
+```
+
+**Generated SQL:**
+```sql
+-- EXISTS example
+SELECT "person"."name", "person"."age"
+FROM "person"
+WHERE EXISTS (
+    SELECT "order"."id", "order"."user_name", "order"."product", "order"."cost"
+    FROM "order"
+    WHERE "order"."user_name" = "person"."name"
+)
+
+-- NOT EXISTS example
+SELECT "person"."name", "person"."age"
+FROM "person"
+WHERE NOT EXISTS (
+    SELECT "order"."id", "order"."user_name", "order"."product", "order"."cost"
+    FROM "order"
+    WHERE "order"."user_name" = "person"."name"
+)
+
+-- Scalar subquery example
+SELECT "order"."id", "order"."user_name", "order"."product", "order"."cost"
+FROM "order"
+WHERE "order"."cost" > (
+    SELECT AVG("order"."cost") AS "avg_cost"
+    FROM "order"
+)
+```
+
+**Key Features:**
+- Type-safe correlation - captured variables maintain type safety
+- Flexible nesting - inner queries can have their own FROM, JOIN, WHERE, etc.
+- Proper SQL generation - EXISTS, NOT EXISTS, and scalar subqueries
+- Column-to-column comparison via unified `eq` operator
+- Clean API - explicit capture makes correlation visible
+
+## How Scanning Works
+
+Kodama uses a **hybrid approach** combining three techniques for reliable and flexible code generation.
+
+### Table Discovery (KSP + Runtime Reflection)
+
+**Phase 1: KSP discovers tables at compile-time**
+
+KSP (Kotlin Symbol Processing) finds table object declarations:
+
+```kotlin
+// KSP discovers these automatically:
+object Person : Table("person") { ... }
+object Order : EntityTable<OrderEntity>("order") { ... }
+
+// Even custom subclasses:
+abstract class CustomTable(name: String) : Table(name)
+object Product : CustomTable("product") { ... }  // ✅ Detected!
+```
+
+KSP outputs: `build/generated/ksp/main/resources/kodama-ksp-metadata.json`
+
+**Phase 2: Runtime reflection extracts column metadata**
+
+After tables are compiled, the generator loads them and accesses their runtime metadata:
+
+```kotlin
+// Loads compiled Table class via URLClassLoader
+val tableClass = classLoader.loadClass("com.example.schema.Person")
+val tableInstance = tableClass.kotlin.objectInstance
+
+// Accesses Table.relation.columns to get DSL results
+val columns = tableInstance.relation.columns  // All column metadata!
+
+// Extracts:
+// - SQL column names (from DSL: varchar("name", ...))
+// - Kotlin types (mapped from ColumnType)
+// - Nullability (from DSL: .nullable())
+// - Auto-generation (from generationStrategy)
+```
+
+**Why this approach?**
+
+KSP alone can't see DSL expressions:
+- KSP sees: `val name = varchar("name", 255).nullable()` as type `Column<String>`
+- KSP does NOT see: the SQL name "name", length 255, or `.nullable()`
+
+Runtime reflection accesses the fully initialized Table object where DSL results are stored.
+
+### Query Pattern Discovery (Regex)
+
+Generator scans test files for query chains using regex:
 
 ```kotlin
 // Finds: from(Person).join(Order)...
 val queryChainPattern = """from\s*\([^)]+\)(?:\s*\.join\s*\([^)]+\)(?:\s*\{[^}]*\})?)*""".toRegex()
 ```
+
+**Why regex?** Test files aren't compiled when code generation runs, so regex is perfect for finding usage patterns.
 
 ### Marker Discovery
 
@@ -484,15 +684,19 @@ This ensures all intermediate builders exist for type-safe chaining.
 
 ### Nullability Tracking
 
-Generator extracts nullability information from table definitions:
+Generator extracts nullability information via runtime reflection:
 
 ```kotlin
-// Scans for .nullable() calls
-val propertyPattern = """val\s+(\w+)\s*=\s*(varchar|integer|...)\s*\([^)]*\)([^\n]*)""".toRegex()
+// Access column via reflection
+val nullableProperty = columnClass.memberProperties.find { it.name == "nullable" }
+nullableProperty.isAccessible = true
+val isNullable = nullableProperty.getter.call(column) as Boolean
 
-// Checks if column is marked nullable
-val isNullable = modifiers.contains(".nullable()")
+// Map to Kotlin type
+val kotlinType = if (isNullable) "$baseType?" else baseType
 ```
+
+This is extracted from the compiled Column instance, which contains the actual DSL results.
 
 Generated result accessors respect nullability:
 
@@ -529,13 +733,24 @@ build/generated/kodama/com/obabichev/kodama/tests/
 
 ### Compilation Order
 
+The Gradle plugin sets up proper task dependencies:
+
 ```
-1. Compile core library
-2. Compile your table definitions
-3. Run code generation (scans tables and queries)
-4. Compile generated code
-5. Compile your test code (uses generated builders)
+1. kspKotlin          → KSP discovers tables, outputs JSON metadata
+2. compileKotlin      → Compiles your table definitions to bytecode
+3. generateKodamaExtensions → Loads compiled classes, extracts metadata, generates code
+4. compileTestKotlin  → Compiles tests using generated builders
 ```
+
+**Critical task dependency chain:**
+```
+kspKotlin → compileKotlin → generateKodamaExtensions → compileTestKotlin
+```
+
+This ensures:
+- Tables are discovered before compilation
+- Tables are compiled before metadata extraction
+- Code is generated before test compilation
 
 ### Caching
 
@@ -641,15 +856,37 @@ val builder = fromBuilder.join(Order) { ... }
 
 ## Implementation
 
-Generator location:
+**Architecture: Hybrid KSP + Runtime Reflection + Regex**
+
+### Key Components
+
+**KSP Processor:**
+```
+kodama-ksp-processor/src/main/kotlin/com/obabichev/kodama/ksp/KodamaSymbolProcessor.kt
+```
+- Discovers table object declarations
+- Outputs JSON metadata file
+
+**Runtime Metadata Extractor:**
+```
+kodama-compiler-plugin/src/main/kotlin/com/obabichev/kodama/compiler/metadata/RuntimeMetadataExtractor.kt
+```
+- Loads compiled Table classes
+- Extracts column metadata via reflection
+
+**Main Generator:**
 ```
 kodama-compiler-plugin/src/main/kotlin/com/obabichev/kodama/compiler/KodamaTableBasedCodegenTask.kt
 ```
 
-Key steps:
-1. Scan schema files for table definitions
-2. Scan test files for query patterns and marker usage
-3. Extract table combinations and marker-table associations
-4. Generate type-safe extension functions (from, join, select, selectAs, orderBy, groupBy)
-5. Generate marker interfaces and result classes
-6. Output to `build/generated/kodama/`
+### Key Steps
+
+1. **Load KSP metadata** - Read JSON file with table names and qualified class names
+2. **Extract runtime metadata** - Load compiled classes, access Table.relation.columns via reflection
+3. **Scan test files** - Use regex to find query patterns and marker usage
+4. **Extract combinations** - Determine which tables are used together
+5. **Generate code** - Create type-safe extension functions (from, join, select, selectAs, orderBy, groupBy)
+6. **Generate markers** - Create marker interfaces and result classes
+7. **Output** - Write to `build/generated/kodama/`
+
+For detailed architecture documentation, see `CODE_GENERATION.md` at the project root.

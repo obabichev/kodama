@@ -49,6 +49,7 @@ class SubqueryTests : DatabaseTest() {
                     .selectAs(OrderUserName) { order.userName }
                     .selectAs(TotalCost) { sum(order.cost) }
                     .groupBy { order.userName }
+                    .build()
             }
                 .selectAll(UserTotals)
 
@@ -59,13 +60,13 @@ class SubqueryTests : DatabaseTest() {
 
             val results = queryBuilder.execute(this)
             val resultList = results.map {
-                (it.userTotals.orderUserName as? String ?: "") to it.userTotals.totalCost?.toInt()
-            }.toList().sortedBy { it.first as String }
+                Pair(it.userTotals.orderUserName as? String ?: "", it.userTotals.totalCost?.toInt())
+            }.toList().sortedBy { it.first }
 
             assertEquals(3, resultList.size, "Should have 3 users")
-            assertEquals("alice" to 1050, resultList[0])
-            assertEquals("bob" to 100, resultList[1])
-            assertEquals("charlie" to 500, resultList[2])
+            assertEquals(Pair("alice", 1050), resultList[0])
+            assertEquals(Pair("bob", 100), resultList[1])
+            assertEquals(Pair("charlie", 500), resultList[2])
         }
     }
 
@@ -86,6 +87,7 @@ class SubqueryTests : DatabaseTest() {
                     .selectAs(OrderUserName) { order.userName }
                     .selectAs(OrderProduct) { order.product }
                     .where { order.cost gte 500 }
+                    .build()
             }
                 .selectAll(ExpensiveOrders)  // Direct parameter - no lambda!
 
@@ -110,13 +112,14 @@ class SubqueryTests : DatabaseTest() {
         }
 
         withConnection {
-            // Inline subquery with .aliasAs<T>() in join
+            // Inline subquery with .aliasAs<T>() API in join
             val queryBuilder = from(Person)
                 .joinAliased(
                     from(Order)
                         .selectAs(OrderUserName) { order.userName }
                         .build()
-                        .aliasAs<UsersWithOrders>()) { person.name eq this.usersWithOrders.orderUserName }
+                        .aliasAs<UsersWithOrders>()
+                ) { person.name eq usersWithOrders.orderUserName }
                 .selectAll(Person)
                 .selectAll(UsersWithOrders)  // Direct parameter - no lambda!
 
@@ -144,7 +147,7 @@ class SubqueryTests : DatabaseTest() {
 
         // Subquery for order counts
         withConnection {
-            // Inline subquery with .aliasAs<T>() in left join
+            // Inline subquery with .aliasAs<T>() API in left join
             val queryBuilder = from(Person)
                 .leftJoinAliased(
                     from(Order)
@@ -152,21 +155,23 @@ class SubqueryTests : DatabaseTest() {
                         .selectAs(OrderCount) { count(order.id) }
                         .groupBy { order.userName }
                         .build()
-                        .aliasAs<OrderCounts>()) { person.name eq this.orderCounts.orderUserName }
+                        .aliasAs<OrderCounts>()
+                ) { person.name eq orderCounts.orderUserName }
                 .selectAll(Person)
                 .selectAll(OrderCounts)  // Direct parameter - no lambda!
 
             val results = queryBuilder.execute(this)
-            val resultList = results.map {
-                val name = it.person.name as String
-                val count = it.orderCounts.orderCount as? Number
-                name to count?.toInt()
-            }.toList().sortedBy { it.first }
+            val resultList: List<Pair<String, Int?>> = results.asSequence().map { row ->
+                val name = row.person.name as String
+                val count = row.orderCounts.orderCount as? Number
+                Pair(name, count?.toInt())
+            }.sortedBy { it.first }.toList()
 
             assertEquals(3, resultList.size, "Should have all 3 people")
             // alice has orders, others don't
             assertEquals("alice", resultList[0].first)
-            assertTrue(resultList[0].second != null && resultList[0].second!! > 0)
+            val aliceCount: Int? = resultList[0].second
+            assertTrue(aliceCount != null && aliceCount > 0)
         }
     }
 

@@ -37,6 +37,14 @@ fun not(expression: Expression): Expression = UnaryOperand("NOT", expression)
 
 infix fun Expression.eq(other: Expression): Expression = BinaryOperand("=", this, other)
 
+// Allow Expression to be compared with Column (e.g., scalar subquery eq column)
+infix fun Expression.eq(column: com.obabichev.kodama.components.Column<*>): Expression =
+    BinaryOperand("=", this, ColumnExpression(column))
+
+// Allow Expression to be compared with TypedColumn
+infix fun <T, TM, CM> Expression.eq(column: com.obabichev.kodama.components.TypedColumn<T, TM, CM>): Expression =
+    BinaryOperand("=", this, ColumnExpression(column.column))
+
 infix fun Expression.neq(other: Expression): Expression = BinaryOperand("<>", this, other)
 
 // Range operators

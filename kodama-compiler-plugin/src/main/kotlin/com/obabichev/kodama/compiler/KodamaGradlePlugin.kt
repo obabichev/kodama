@@ -10,10 +10,16 @@ class KodamaGradlePlugin : Plugin<Project> {
         // Create and register the extension
         val extension = project.extensions.create("kodama", KodamaExtension::class.java, project)
 
-        // Register the code generation task - using new table-based generator
-        val generateTask = project.tasks.register("generateKodamaExtensions", KodamaTableBasedCodegenTask::class.java) {
+        // Register Phase 1 task: Structure-driven code generation
+        val generateTableMetadataTask = project.tasks.register("generateKodamaTableMetadata", GenerateTableMetadataTask::class.java) {
             it.group = "kodama"
-            it.description = "Generate query extensions for Kodama based on Table definitions"
+            it.description = "Generate table metadata (Phase 1: structure-driven, independent of usage patterns)"
+        }
+
+        // Register Phase 2 task: Pattern-driven code generation
+        val generateQueryExtensionsTask = project.tasks.register("generateKodamaQueryExtensions", GenerateQueryExtensionsTask::class.java) {
+            it.group = "kodama"
+            it.description = "Generate query extensions (Phase 2: pattern-driven, based on usage in tests)"
         }
 
         // Configure task properties after project evaluation
@@ -34,32 +40,79 @@ class KodamaGradlePlugin : Plugin<Project> {
             project.logger.info("Kodama: Using schema package: $detectedSchemaPackage")
             project.logger.info("Kodama: Using generated package: $detectedGeneratedPackage")
 
-            generateTask.configure {
+            // Configure Phase 1 task (Table Metadata)
+            val buildDir = project.layout.buildDirectory.asFile.get()
+            val generatedDir = File(buildDir, "generated/kodama")
+            val kspMetadataFile = File(buildDir, "generated/ksp/main/resources/kodama-ksp-metadata.json")
+            val tableMetadataFile = File(generatedDir, "TableMetadata.kt")
+            val queryExtensionsFile = File(generatedDir, "QueryExtensions.kt")
+
+            generateTableMetadataTask.configure {
                 it.schemaPackage.set(detectedSchemaPackage)
                 it.generatedPackage.set(detectedGeneratedPackage)
+                it.kspMetadataFile.set(kspMetadataFile)
+                it.outputFile.set(tableMetadataFile)
+            }
+
+            // Configure Phase 2 task (Query Extensions)
+            val testDir = File(project.projectDir, "src/test/kotlin")
+            generateQueryExtensionsTask.configure {
+                it.schemaPackage.set(detectedSchemaPackage)
+                it.generatedPackage.set(detectedGeneratedPackage)
+                it.kspMetadataFile.set(kspMetadataFile)
+                it.tableMetadataFile.set(tableMetadataFile)  // Depends on Phase 1 output
+                it.testFiles.setFrom(project.fileTree(testDir).matching { pattern ->
+                    pattern.include("**/*.kt")
+                })
+                it.outputFile.set(queryExtensionsFile)
             }
         }
 
-        // Make compilation depend on code generation
+        // Configure task dependencies and source sets
         project.afterEvaluate {
             val kotlinExtension = project.extensions.findByType(KotlinProjectExtension::class.java)
             kotlinExtension?.let { kotlin ->
-                // Add generated sources to BOTH main and test source sets
+                // Add generated sources to test source set (generated code is for test queries)
                 val generatedDir = File(project.layout.buildDirectory.asFile.get(), "generated/kodama")
-
-                // Add to main source set so generated code is available in production code
-                kotlin.sourceSets.findByName("main")?.kotlin?.srcDir(generatedDir)
-
-                // Add to test source set so generated code is available in tests
                 kotlin.sourceSets.findByName("test")?.kotlin?.srcDir(generatedDir)
 
-                // Make BOTH main and test compilation depend on code generation
-                // This ensures IntelliJ's "Build Project" triggers regeneration
+                // Critical: Set up proper task dependencies for two-phase KSP-based code generation
+                // Phase 1 (Structure-Driven):
+                //   1. kspKotlin runs first (generates metadata JSON from source)
+                //   2. compileKotlin runs second (compiles Table classes to bytecode)
+                //   3. generateKodamaTableMetadata runs third (generates structure-driven code)
+                // Phase 2 (Pattern-Driven):
+                //   4. generateKodamaQueryExtensions runs fourth (scans tests, generates pattern-driven code)
+                //   5. compileTestKotlin runs fifth (compiles tests using generated code)
+
+                // Phase 1 dependencies: Make generateKodamaTableMetadata depend on compileKotlin
+                // (needs compiled Table classes for runtime metadata extraction)
                 project.tasks.findByName("compileKotlin")?.let { compileTask ->
-                    compileTask.dependsOn(generateTask)
+                    generateTableMetadataTask.configure { it.dependsOn(compileTask) }
                 }
-                project.tasks.named("compileTestKotlin").configure { compileTask ->
-                    compileTask.dependsOn(generateTask)
+
+                // Phase 1 dependencies: Make generateKodamaTableMetadata depend on kspKotlin
+                // (needs KSP metadata JSON)
+                project.tasks.findByName("kspKotlin")?.let { kspTask ->
+                    generateTableMetadataTask.configure { it.mustRunAfter(kspTask) }
+                }
+
+                // Phase 2 dependencies: Make generateKodamaQueryExtensions depend on Phase 1
+                // (needs TableMetadata.kt from Phase 1)
+                generateQueryExtensionsTask.configure {
+                    it.dependsOn(generateTableMetadataTask)
+                }
+
+                // Make compileTestKotlin depend on Phase 2
+                // (tests need generated QueryExtensions.kt)
+                project.tasks.findByName("compileTestKotlin")?.let { compileTestTask ->
+                    compileTestTask.dependsOn(generateQueryExtensionsTask)
+                }
+
+                // Make kspTestKotlin depend on Phase 2
+                // (KSP processes test sources which may reference generated code)
+                project.tasks.findByName("kspTestKotlin")?.let { kspTestTask ->
+                    kspTestTask.dependsOn(generateQueryExtensionsTask)
                 }
             }
         }

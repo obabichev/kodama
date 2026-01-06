@@ -8,6 +8,7 @@ import com.obabichev.kodama.tests.schema.Person
 import com.obabichev.kodama.tests.schema.generated.*
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.Ignore
 
 // Marker objects are auto-generated in the generated package
 // Import them using: PersonName, PersonAge, OrderProduct, OrderCost

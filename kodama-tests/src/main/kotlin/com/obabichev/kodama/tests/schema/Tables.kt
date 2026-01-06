@@ -5,10 +5,11 @@ import com.obabichev.kodama.schema.EntityTable
 import com.obabichev.kodama.schema.primaryKey
 import com.obabichev.kodama.schema.nullable
 import com.obabichev.kodama.schema.identity
-import com.obabichev.kodama.tests.entity.User
-import com.obabichev.kodama.tests.entity.UserOrder
-import com.obabichev.kodama.entity.oneToMany
-import com.obabichev.kodama.entity.manyToOne
+// Temporarily commented out for KSP migration testing
+// import com.obabichev.kodama.tests.entity.User
+// import com.obabichev.kodama.tests.entity.UserOrder
+// import com.obabichev.kodama.entity.oneToMany
+// import com.obabichev.kodama.entity.manyToOne
 
 /**
  * Person table definition
@@ -86,6 +87,8 @@ object Numerics : Table("numerics") {
     val nullableDouble = doublePrecision("nullable_double").nullable()
 }
 
+// Temporarily commented out for KSP migration testing (requires entity layer)
+/*
 /**
  * UserOrders entity table - orders placed by users.
  * Demonstrates one-to-many relationship with Users.
@@ -117,7 +120,10 @@ object UserOrders : EntityTable<UserOrder>("user_orders") {
         manyToOne("user", Users, this.userId, Users.id)
     }
 }
+*/
 
+// Temporarily commented out for KSP migration testing (requires entity layer)
+/*
 /**
  * Users entity table - example EntityTable with ORM support.
  *
@@ -152,6 +158,7 @@ object Users : EntityTable<User>("users") {
         oneToMany("orders", UserOrders, UserOrders.userId, this.id)
     }
 }
+*/
 
 /**
  * TradingStrategy table - PascalCase naming test.

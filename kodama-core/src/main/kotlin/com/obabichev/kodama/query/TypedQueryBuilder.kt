@@ -190,6 +190,7 @@ class QueryState {
     var _limit: Int? = null
     var _offset: Int? = null
     val relations = RelationsContainer()
+    val _subqueryTables: MutableMap<String, Table> = mutableMapOf()  // Track subquery tables by SQL name
 
     /**
      * Apply a selection marker to the query state

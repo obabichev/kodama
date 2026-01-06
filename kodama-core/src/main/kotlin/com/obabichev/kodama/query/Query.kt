@@ -89,13 +89,12 @@ class Query(
                     com.obabichev.kodama.components.JoinType.LEFT -> "LEFT JOIN"
                     com.obabichev.kodama.components.JoinType.RIGHT -> "RIGHT JOIN"
                 }
-                val (leftColumn, rightColumn) = join.condition
 
                 // Generate join target - check if it's a subquery
                 val joinTarget = generateFromClause(join.relation)
 
-                // Quote both table and column names to handle SQL keywords and case sensitivity
-                append(" $joinType $joinTarget ON \"${leftColumn.relation.name}\".\"${leftColumn.name}\" = \"${rightColumn.relation.name}\".\"${rightColumn.name}\"")
+                // Use Expression.toSql() for the join condition
+                append(" $joinType $joinTarget ON ${join.condition.toSql()}")
             }
         }
 
@@ -142,12 +141,14 @@ class Query(
             args.addAll(fromTable.subquery.arguments())
         }
 
-        // Add arguments from JOIN subqueries
+        // Add arguments from JOIN subqueries and join conditions
         joins.forEach { join ->
             val joinTable = com.obabichev.kodama.schema.Tables.findByRelation(join.relation)
             if (joinTable is SubqueryTable) {
                 args.addAll(joinTable.subquery.arguments())
             }
+            // Add arguments from join condition expression
+            args.addAll(join.condition.arguments())
         }
 
         // Add arguments from WHERE clause

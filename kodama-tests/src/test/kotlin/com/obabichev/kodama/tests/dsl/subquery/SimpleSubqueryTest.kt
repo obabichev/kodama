@@ -14,6 +14,19 @@ import kotlin.test.assertEquals
 class SimpleSubqueryTest : DatabaseTest() {
     override fun requiredTables(): List<Table> = listOf(Order, Person)
 
+    // Pattern discovery helpers - define subquery markers used in joinAliased
+    private fun discoverUsersWithOrders() = fromAliased(UsersWithOrders) {
+        from(Order).selectAs(OrderUserName) { order.userName }.build()
+    }
+
+    private fun discoverOrderCounts() = fromAliased(OrderCounts) {
+        from(Order)
+            .selectAs(OrderUserName) { order.userName }
+            .selectAs(OrderCount) { count(order.id) }
+            .groupBy { order.userName }
+            .build()
+    }
+
     @Test
     fun testSimpleSubqueryWithAggregates() {
         testData {
@@ -29,6 +42,7 @@ class SimpleSubqueryTest : DatabaseTest() {
                     .selectAs(OrderUserName) { order.userName }
                     .selectAs(MyAlias) { sum(order.cost) }
                     .groupBy { order.userName }
+                    .build()
             }
                 .selectAll(UserTotalsNew)  // Direct parameter - no lambda!
                 .execute(this)
@@ -58,7 +72,7 @@ class SimpleSubqueryTest : DatabaseTest() {
                         .selectAs(OrderUserName) { order.userName }
                         .build()
                         .aliasAs<UsersWithOrders>()
-                ) { person.name eq this.usersWithOrders.orderUserName }
+                ) { person.name eq usersWithOrders.orderUserName }
                 .selectAll(Person)
                 .selectAll(UsersWithOrders)  // Direct parameter - no lambda!
                 .execute(this)
@@ -91,7 +105,8 @@ class SimpleSubqueryTest : DatabaseTest() {
                         .selectAs(OrderCount) { count(order.id) }
                         .groupBy { order.userName }
                         .build()
-                        .aliasAs<OrderCounts>()) { person.name eq this.orderCounts.orderUserName }
+                        .aliasAs<OrderCounts>()
+                ) { person.name eq orderCounts.orderUserName }
                 .selectAll(Person)
                 .execute(this)
 
@@ -118,6 +133,7 @@ class SimpleSubqueryTest : DatabaseTest() {
                     .selectAs(OrderUserName) { order.userName }
                     .selectAs(MyAlias) { sum(order.cost) }
                     .groupBy { order.userName }
+                    .build()
             }
                 .selectAll(UserTotalSubquery)
 
