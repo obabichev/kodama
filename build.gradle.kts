@@ -28,22 +28,24 @@ subprojects {
     apply(plugin = rootProject.libs.plugins.jvm.get().pluginId)
 }
 
-// Task to publish both core and compiler plugin
+// Task to publish all modules (core, KSP processor, and compiler plugin)
 // The compiler plugin is an included build, so we need to invoke it explicitly
 tasks.register("publishAllToMavenLocal") {
     group = "publishing"
-    description = "Publishes all modules (including compiler plugin) to Maven Local"
+    description = "Publishes all modules (including compiler plugin and KSP processor) to Maven Local"
 
     dependsOn(gradle.includedBuild("kodama-compiler-plugin").task(":publishToMavenLocal"))
     dependsOn(":kodama-core:publishToMavenLocal")
+    dependsOn(":kodama-ksp-processor:publishToMavenLocal")
 }
 
 tasks.register("publishAll") {
     group = "publishing"
-    description = "Publishes all modules (including compiler plugin) to configured repositories"
+    description = "Publishes all modules (including compiler plugin and KSP processor) to configured repositories"
 
     dependsOn(gradle.includedBuild("kodama-compiler-plugin").task(":publish"))
     dependsOn(":kodama-core:publish")
+    dependsOn(":kodama-ksp-processor:publish")
 }
 
 // Task to create a Maven Central bundle with checksums for manual upload
@@ -131,6 +133,7 @@ tasks.register("createReleaseBundle") {
     // Publish to staging directory first (requires GPG signing)
     dependsOn(gradle.includedBuild("kodama-compiler-plugin").task(":publishAllPublicationsToStagingRepository"))
     dependsOn(":kodama-core:publishMavenPublicationToStagingRepository")
+    dependsOn(":kodama-ksp-processor:publishMavenPublicationToStagingRepository")
 
     doLast {
         val bundleDirPath = bundleDir.get().asFile

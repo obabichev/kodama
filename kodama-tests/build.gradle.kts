@@ -1,6 +1,6 @@
 plugins {
     kotlin("jvm") apply true
-    alias(libs.plugins.ksp)
+    alias(libs.plugins.ksp)  // Required for Kodama to discover tables
     id("com.obabichev.kodama")
 }
 
@@ -23,7 +23,8 @@ dependencies {
     implementation(kotlin("test-junit"))
 
     implementation(project(":kodama-core"))
-    ksp(project(":kodama-ksp-processor"))
+    // KSP processor is now auto-configured by Kodama
+    // ksp(project(":kodama-ksp-processor"))
 
     implementation(libs.slf4j)
     implementation(libs.log4j.slf4j.impl)
