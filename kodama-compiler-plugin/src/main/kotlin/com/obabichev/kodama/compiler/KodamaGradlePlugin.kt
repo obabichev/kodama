@@ -7,6 +7,11 @@ import java.io.File
 
 class KodamaGradlePlugin : Plugin<Project> {
     override fun apply(project: Project) {
+        // Check if KSP plugin is applied
+        project.pluginManager.withPlugin("com.google.devtools.ksp") {
+            project.logger.info("Kodama: KSP plugin detected")
+        }
+
         // Create and register the extension
         val extension = project.extensions.create("kodama", KodamaExtension::class.java, project)
 
@@ -24,6 +29,46 @@ class KodamaGradlePlugin : Plugin<Project> {
 
         // Configure task properties after project evaluation
         project.afterEvaluate {
+            // Check if KSP plugin is applied
+            val kspPluginApplied = project.plugins.hasPlugin("com.google.devtools.ksp")
+            if (!kspPluginApplied) {
+                throw IllegalStateException("""
+                    |
+                    |====================================================================================
+                    |Kodama Error: KSP plugin is not applied!
+                    |====================================================================================
+                    |
+                    |Kodama requires the KSP (Kotlin Symbol Processing) plugin to discover table definitions.
+                    |
+                    |Please add the KSP plugin to your build.gradle.kts:
+                    |
+                    |    plugins {
+                    |        id("com.google.devtools.ksp") version "2.0.21-1.0.27"
+                    |        id("com.obabichev.kodama") version "0.4.0"
+                    |    }
+                    |
+                    |The KSP plugin must be applied BEFORE the Kodama plugin.
+                    |====================================================================================
+                    |
+                """.trimMargin())
+            }
+
+            // Auto-configure KSP processor dependency
+            // Check if kodama-ksp-processor is available as a project dependency (for internal builds)
+            val kspProcessorDependency = if (project.rootProject.subprojects.any { it.name == "kodama-ksp-processor" }) {
+                project.project(":kodama-ksp-processor")
+            } else {
+                "com.obabichev.kodama:kodama-ksp-processor:0.4.0"
+            }
+
+            try {
+                project.dependencies.add("ksp", kspProcessorDependency)
+                project.logger.info("Kodama: Added KSP processor dependency: $kspProcessorDependency")
+            } catch (e: Exception) {
+                project.logger.warn("Kodama: Could not automatically add KSP processor dependency. " +
+                    "Please add manually: ksp(\"com.obabichev.kodama:kodama-ksp-processor:0.4.0\")")
+            }
+
             val schemaDir = File(project.projectDir, "src/main/kotlin")
             val detectedSchemaPackage = if (extension.schemaPackage.get().isEmpty()) {
                 detectPackageFromSourceFiles(schemaDir, project)
@@ -94,7 +139,7 @@ class KodamaGradlePlugin : Plugin<Project> {
                 // Phase 1 dependencies: Make generateKodamaTableMetadata depend on kspKotlin
                 // (needs KSP metadata JSON)
                 project.tasks.findByName("kspKotlin")?.let { kspTask ->
-                    generateTableMetadataTask.configure { it.mustRunAfter(kspTask) }
+                    generateTableMetadataTask.configure { it.dependsOn(kspTask) }
                 }
 
                 // Phase 2 dependencies: Make generateKodamaQueryExtensions depend on Phase 1

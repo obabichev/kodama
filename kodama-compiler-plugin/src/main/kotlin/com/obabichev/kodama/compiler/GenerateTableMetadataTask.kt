@@ -56,10 +56,14 @@ abstract class GenerateTableMetadataTask : DefaultTask() {
             error("""
                 Kodama: KSP metadata file not found at ${kspMetadataPath.absolutePath}
 
-                Make sure you have:
-                1. Applied the KSP plugin
-                2. Added kodama-ksp-processor as ksp() dependency
-                3. Run kspKotlin task before this task
+                The Kodama plugin should automatically configure KSP, but it seems KSP hasn't run yet.
+
+                Troubleshooting:
+                1. Make sure you have defined Table objects: object MyTable : Table("...")
+                2. Try running: ./gradlew kspKotlin --rerun-tasks
+                3. If KSP plugin is missing, add to build.gradle.kts:
+                   id("com.google.devtools.ksp") version "2.0.21-1.0.27"
+                4. Check that mavenCentral() is in your repositories (for KSP processor)
             """.trimIndent())
         }
 

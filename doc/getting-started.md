@@ -17,10 +17,11 @@ Kodama is a type-safe SQL query builder and ORM for Kotlin that provides compile
 
 ### Option 1: From Maven Central (Recommended - Coming Soon)
 
-Once published to Maven Central, simply add Kodama to your `build.gradle.kts`:
+Once published to Maven Central, add Kodama to your `build.gradle.kts`:
 
 ```kotlin
 plugins {
+    id("com.google.devtools.ksp") version "2.0.21-1.0.27"  // Required for table discovery
     id("com.obabichev.kodama") version "0.4.0"
 }
 
@@ -39,9 +40,14 @@ dependencies {
 - `kodama-core` - The core library with query DSL and entity layer
 - PostgreSQL JDBC driver (included automatically as a transitive dependency)
 - SLF4J API (included automatically as a transitive dependency)
+- **KSP processor** (configured automatically by Kodama - no manual dependency needed)
 
 **What you need to add:**
+- The KSP Gradle plugin (in `plugins {}` block)
 - An SLF4J implementation (Log4j, Logback, or another) - required for logging
+
+**Note on KSP (Kotlin Symbol Processing):**
+Kodama uses KSP to discover your table definitions at compile time. You must apply the KSP plugin, and the Kodama plugin will automatically add the `kodama-ksp-processor` dependency for you.
 
 ### Option 2: From Maven Local (For Testing)
 
@@ -86,6 +92,7 @@ Now you can use Kodama in your `build.gradle.kts`:
 
 ```kotlin
 plugins {
+    id("com.google.devtools.ksp") version "2.0.21-1.0.27"  // Required for table discovery
     id("com.obabichev.kodama") version "0.4.0"
 }
 
@@ -98,7 +105,9 @@ dependencies {
 }
 ```
 
-**Note:** When Kodama is published to Maven Central, you can remove `mavenLocal()` from your repositories.
+**Note:**
+- When Kodama is published to Maven Central, you can remove `mavenLocal()` from your repositories.
+- The Kodama plugin automatically configures the KSP processor dependency. No manual `ksp()` dependency needed.
 
 ### Package Configuration (Optional)
 
