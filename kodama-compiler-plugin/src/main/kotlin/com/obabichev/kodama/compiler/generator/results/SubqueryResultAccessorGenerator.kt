@@ -74,7 +74,8 @@ class SubqueryResultAccessorGenerator(
                 else -> "getObject"
             }
 
-            appendLine("    val ${column.propertyName}: ${column.kotlinType}")
+            // All subquery properties are nullable to support LEFT/RIGHT/FULL OUTER JOINs
+            appendLine("    val ${column.propertyName}: ${column.kotlinType}?")
             appendLine("        get() {")
             appendLine("            return resultSet.$getterMethod(\"${column.sqlColumnName}\")")
             appendLine("        }")

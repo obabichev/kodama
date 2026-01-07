@@ -76,19 +76,61 @@ class GeneratorFactory(
     }
 
     /**
-     * Phase 1: Marker interface generators (7 types).
+     * Helper function to wrap a generator with target file information for a combination.
+     */
+    private fun CodeGenerator.forCombination(combination: QueryCombinationInfo): CodeGenerator =
+        this.withTargetFile(TargetFileResolver.forCombination(combination))
+
+    /**
+     * Helper function to wrap a generator with target file information for a subquery.
+     */
+    private fun CodeGenerator.forSubquery(subquery: SubqueryInfo): CodeGenerator =
+        this.withTargetFile(TargetFileResolver.forSubquery(subquery))
+
+    /**
+     * Helper function to wrap a generator for markers file.
+     */
+    private fun CodeGenerator.forMarkersFile(): CodeGenerator =
+        this.withTargetFile(TargetFileResolver.forMarkers())
+
+    /**
+     * Helper function to wrap a generator for selection sets file.
+     */
+    private fun CodeGenerator.forSelectionSetsFile(): CodeGenerator =
+        this.withTargetFile(TargetFileResolver.forSelectionSets())
+
+    /**
+     * Helper function to wrap a generator for join patterns file.
+     */
+    private fun CodeGenerator.forJoinPatternsFile(): CodeGenerator =
+        this.withTargetFile(TargetFileResolver.forJoinPatterns())
+
+    /**
+     * Helper function to wrap a generator for subquery infrastructure file.
+     */
+    private fun CodeGenerator.forSubqueryInfrastructureFile(): CodeGenerator =
+        this.withTargetFile(TargetFileResolver.forSubqueryInfrastructure())
+
+    /**
+     * Helper function to wrap a generator for a single table's file.
+     */
+    private fun CodeGenerator.forTable(table: com.obabichev.kodama.compiler.data.TableInfo): CodeGenerator =
+        this.withTargetFile("single_table/${table.capitalizedName}Query.kt")
+
+    /**
+     * Phase 1: Marker interface generators (8 types).
      */
     private fun createMarkerGenerators(): List<CodeGenerator> = buildList {
         // Column markers for each UNIQUE column name (deduplicated across all tables)
         val uniqueColumns = data.tables.flatMap { it.columns }
             .distinctBy { it.propertyName }
         uniqueColumns.forEach { column ->
-            add(ColumnMarkerGenerator(column))
+            add(ColumnMarkerGenerator(column).forMarkersFile())
         }
 
         // Table markers for each table
         data.tables.forEach { table ->
-            add(TableMarkerGenerator(table))
+            add(TableMarkerGenerator(table).forMarkersFile())
         }
 
         // NOTE: AllMarker classes (PersonAllMarker, etc.) are generated in TableMetadata.kt
@@ -96,13 +138,13 @@ class GeneratorFactory(
 
         // Selection markers
         data.markers.forEach { marker ->
-            add(SelectionMarkerGenerator(marker))
+            add(SelectionMarkerGenerator(marker).forSelectionSetsFile())
         }
 
         // Subquery markers
         data.subqueries.forEach { subquery ->
-            add(SubqueryMarkerGenerator(subquery))
-            add(SubqueryAllMarkerGenerator(subquery))
+            add(SubqueryMarkerGenerator(subquery).forMarkersFile())
+            add(SubqueryAllMarkerGenerator(subquery).forSubquery(subquery))
         }
 
         // Selection set markers (generated for each marker combination AND all its prefixes)
@@ -114,32 +156,38 @@ class GeneratorFactory(
                 val phantomTypeName = "SelectionSet_" + prefix.joinToString("_") { it.interfaceName }
                 if (phantomTypeName !in generatedPhantomTypes) {
                     generatedPhantomTypes.add(phantomTypeName)
-                    add(SelectionSetMarkerGenerator(phantomTypeName))
+                    add(SelectionSetMarkerGenerator(phantomTypeName).forSelectionSetsFile())
                 }
             }
         }
 
         // HasAliasedSelections marker (single instance)
-        add(HasAliasedSelectionsMarkerGenerator())
+        add(HasAliasedSelectionsMarkerGenerator().forMarkersFile())
+
+        // Join pattern markers - collect all unique join patterns from query combinations
+        val allJoinPatterns = data.queryCombinations
+            .map { it.joinPattern }
+            .toSet()
+        add(JoinPatternMarkerGenerator(allJoinPatterns).forJoinPatternsFile())
     }
 
     /**
      * Phase 2: Accessor generators (11 types).
      */
     private fun createAccessorGenerators(): List<CodeGenerator> = buildList {
-        // Table accessors
+        // Table accessors - go to their respective table files
         data.tables.forEach { table ->
-            add(TableAccessorGenerator(table, schemaPackage))
+            add(TableAccessorGenerator(table, schemaPackage).forTable(table))
         }
 
         // NOTE: OrderByAccessor and GroupByAccessor classes are generated in TableMetadata.kt
         // Don't generate them here to avoid redeclaration
 
-        // Subquery accessors
+        // Subquery accessors - go to their respective subquery files
         data.subqueries.forEach { subquery ->
-            add(SubqueryAccessorGenerator(subquery))
-            add(SubqueryOrderByAccessorGenerator(subquery))
-            add(SubqueryGroupByAccessorGenerator(subquery))
+            add(SubqueryAccessorGenerator(subquery).forSubquery(subquery))
+            add(SubqueryOrderByAccessorGenerator(subquery).forSubquery(subquery))
+            add(SubqueryGroupByAccessorGenerator(subquery).forSubquery(subquery))
         }
 
         // Result accessors - All variant
@@ -149,32 +197,49 @@ class GeneratorFactory(
 
     /**
      * Phase 3: Context generators (6 types).
+     * Deduplicate by table names only - contexts are shared across join patterns.
      */
     private fun createContextGenerators(): List<CodeGenerator> = buildList {
-        data.queryCombinations.forEach { combination ->
-            add(SelectContextGenerator(combination, schemaPackage))
-            add(WhereContextGenerator(combination, schemaPackage))
-            add(OrderByContextGenerator(combination, schemaPackage))
-            add(GroupByContextGenerator(combination, schemaPackage))
-            add(SelectAllContextGenerator(combination, schemaPackage))
+        // Deduplicate combinations by table names for shared context classes
+        val uniqueCombinations = data.queryCombinations.distinctBy { combination ->
+            combination.tables.map { it.name }.joinToString("_")
+        }
+
+        uniqueCombinations.forEach { combination ->
+            add(SelectContextGenerator(combination, schemaPackage).forCombination(combination))
+            add(WhereContextGenerator(combination, schemaPackage).forCombination(combination))
+            add(OrderByContextGenerator(combination, schemaPackage).forCombination(combination))
+            add(GroupByContextGenerator(combination, schemaPackage).forCombination(combination))
+            add(SelectAllContextGenerator(combination, schemaPackage).forCombination(combination))
         }
 
         // JoinContext requires specific fromCombination + joiningTable
         // Generate for valid table progressions with deduplication
         val generatedJoinContexts = mutableSetOf<String>()
-        data.queryCombinations.forEach { combination ->
+        uniqueCombinations.forEach { combination ->
             if (combination.tables.size >= 2) {
                 // For each table except the first (joined tables)
                 combination.tables.drop(1).forEachIndexed { index, joiningTable ->
+                    // Create a sub-combination for join context generation
+                    val subTables = combination.tables.take(index + 1)
                     val fromCombination = QueryCombinationInfo(
-                        tables = combination.tables.take(index + 1)
+                        baseTable = subTables.first(),
+                        joinedTables = subTables.drop(1).map {
+                            com.obabichev.kodama.compiler.data.JoinedTableInfo(it, com.obabichev.kodama.compiler.data.JoinType.INNER)
+                        }
                     )
                     val allTables = fromCombination.tables + joiningTable
                     val contextName = "JoinContext_" + allTables.joinToString("_") { it.capitalizedName }
 
                     if (contextName !in generatedJoinContexts) {
                         generatedJoinContexts.add(contextName)
-                        add(JoinContextGenerator(fromCombination, joiningTable, schemaPackage))
+                        // JoinContext goes to the target combination file (fromCombination + joiningTable)
+                        val targetCombination = QueryCombinationInfo(
+                            baseTable = fromCombination.baseTable,
+                            joinedTables = fromCombination.joinedTables +
+                                com.obabichev.kodama.compiler.data.JoinedTableInfo(joiningTable, com.obabichev.kodama.compiler.data.JoinType.INNER)
+                        )
+                        add(JoinContextGenerator(fromCombination, joiningTable, schemaPackage).forCombination(targetCombination))
                     }
                 }
             }
@@ -185,11 +250,15 @@ class GeneratorFactory(
      * Phase 4: Builder generators (4 types).
      */
     private fun createBuilderGenerators(): List<CodeGenerator> = buildList {
-        // Query builder classes
-        data.queryCombinations.forEach { combination ->
-            add(QueryBuilderClassGenerator(combination))
-            add(QueryBuilderBuildMethodGenerator(combination))
-            add(QueryBuilderAliasAsMethodGenerator(combination))
+        // Query builder classes - deduplicate by table names (builders are shared across join patterns)
+        val uniqueCombinations = data.queryCombinations.distinctBy { combination ->
+            combination.tables.map { it.name }.joinToString("_")
+        }
+
+        uniqueCombinations.forEach { combination ->
+            add(QueryBuilderClassGenerator(combination).forCombination(combination))
+            add(QueryBuilderBuildMethodGenerator(combination).forCombination(combination))
+            add(QueryBuilderAliasAsMethodGenerator(combination).forCombination(combination))
         }
 
         // NOTE: Subquery builder classes are now generated via queryCombinations
@@ -199,61 +268,130 @@ class GeneratorFactory(
 
     /**
      * Phase 5: Extension method generators (22 types).
+     * Deduplicate join methods by table names - join methods are shared across join patterns.
      */
     private fun createExtensionGenerators(): List<CodeGenerator> = buildList {
         // NOTE: from() methods are generated in TableMetadata.kt by generateKodamaTableMetadata task
         // Don't generate them here to avoid conflicts
 
+        // Deduplicate combinations by table names for shared join methods
+        val uniqueCombinations = data.queryCombinations.distinctBy { combination ->
+            combination.tables.map { it.name }.joinToString("_")
+        }
+
         // Join methods for each combination progression
         // Only generate join methods for combinations that actually exist
-        data.queryCombinations.forEach { toCombination ->
+        uniqueCombinations.forEach { toCombination ->
             if (toCombination.tables.size >= 2) {
                 // This is a multi-table combination, so generate join from the previous combination
                 val joiningTable = toCombination.tables.last()
+                val fromTables = toCombination.tables.dropLast(1)
                 val fromCombination = QueryCombinationInfo(
-                    tables = toCombination.tables.dropLast(1)
+                    baseTable = fromTables.first(),
+                    joinedTables = fromTables.drop(1).map {
+                        com.obabichev.kodama.compiler.data.JoinedTableInfo(it, com.obabichev.kodama.compiler.data.JoinType.INNER)
+                    }
                 )
 
-                if (joiningTable.isSubquery) {
-                    // Generate joinAliased/leftJoinAliased for subqueries
-                    val subqueryInfo = data.subqueries.find { it.name == joiningTable.name }
-                    if (subqueryInfo != null) {
-                        add(JoinAliasedMethodGenerator(fromCombination, subqueryInfo, toCombination))
-                        add(LeftJoinAliasedMethodGenerator(fromCombination, subqueryInfo, toCombination))
+                if (!joiningTable.isSubquery) {
+                    // Generate join methods only for patterns that actually exist
+                    // Helper function to check if a join pattern exists
+                    fun patternExists(pattern: String): Boolean {
+                        val tableNames = toCombination.tables.map { it.name }
+                        return data.queryCombinations.any { combo ->
+                            combo.tables.map { it.name } == tableNames && combo.joinPattern == pattern
+                        }
                     }
-                } else {
-                    // Generate regular join/leftJoin for tables
-                    add(JoinMethodGenerator(fromCombination, joiningTable, toCombination, schemaPackage))
-                    add(LeftJoinMethodGenerator(fromCombination, joiningTable, toCombination, schemaPackage))
+
+                    // Compute what the join pattern would be for each join type
+                    val basePattern = if (fromCombination.joinedTables.isEmpty()) "" else "${fromCombination.joinPattern}_"
+
+                    // Generate join methods only if target pattern exists
+                    // Join methods go to the FROM combination file (the source of the join)
+                    if (patternExists(basePattern + "INNER")) {
+                        add(JoinMethodGenerator(fromCombination, joiningTable, toCombination, schemaPackage).forCombination(fromCombination))
+                        add(InnerJoinMethodGenerator(fromCombination, joiningTable, toCombination, schemaPackage).forCombination(fromCombination))
+                    }
+                    if (patternExists(basePattern + "LEFT")) {
+                        add(LeftJoinMethodGenerator(fromCombination, joiningTable, toCombination, schemaPackage).forCombination(fromCombination))
+                    }
+                    if (patternExists(basePattern + "RIGHT")) {
+                        add(RightJoinMethodGenerator(fromCombination, joiningTable, toCombination, schemaPackage).forCombination(fromCombination))
+                    }
+                    if (patternExists(basePattern + "FULL")) {
+                        add(FullJoinMethodGenerator(fromCombination, joiningTable, toCombination, schemaPackage).forCombination(fromCombination))
+                    }
                 }
             }
         }
 
-        // Select methods for each combination
-        data.queryCombinations.forEach { combination ->
-            add(SelectMethodGenerator(combination))
+        // Generate joinAliased and leftJoinAliased methods for SINGLE-TABLE combinations with each subquery
+        // This allows inline subqueries to be joined to any existing query
+        // We limit this to single tables to avoid code explosion (N tables × M subqueries creates N*M combinations)
+        // Users can chain joins if needed: from(T1).join(T2).joinAliased(SQ) works via the T1+T2 builder
+        val singleTableCombinations = uniqueCombinations.filter { combo ->
+            combo.tables.size == 1 && !combo.tables.first().isSubquery
+        }
+
+        data.subqueries.forEach { subquery ->
+            // For each single table, generate joinAliased methods to add this subquery
+            singleTableCombinations.forEach { fromCombination ->
+                // Create the target combination by adding the subquery
+                val subqueryTable = TableInfo(
+                    name = subquery.name,
+                    sqlTableName = subquery.sqlAlias,
+                    columns = subquery.columns.map { col ->
+                        ColumnInfo(
+                            propertyName = col.propertyName,
+                            sqlColumnName = col.sqlColumnName,
+                            kotlinType = col.kotlinType,
+                            isNullable = false,
+                            isAutoGenerated = false,
+                            isPrimaryKey = false
+                        )
+                    },
+                    isSubquery = true
+                )
+
+                val toCombination = QueryCombinationInfo(
+                    baseTable = fromCombination.baseTable,
+                    joinedTables = fromCombination.joinedTables + JoinedTableInfo(subqueryTable, JoinType.INNER)
+                )
+
+                // joinAliased methods go to the FROM combination file
+                add(JoinAliasedMethodGenerator(fromCombination, subquery, toCombination).forCombination(fromCombination))
+                add(LeftJoinAliasedMethodGenerator(fromCombination, subquery, toCombination).forCombination(fromCombination))
+                add(RightJoinAliasedMethodGenerator(fromCombination, subquery, toCombination).forCombination(fromCombination))
+                add(FullJoinAliasedMethodGenerator(fromCombination, subquery, toCombination).forCombination(fromCombination))
+            }
+        }
+
+        // Select methods for each combination (deduplicate by table names)
+        uniqueCombinations.forEach { combination ->
+            add(SelectMethodGenerator(combination).forCombination(combination))
             // NOTE: Generic selectAs removed - replaced by marker-specific selectAs methods below
             // add(SelectAsMethodGenerator(combination))
             // Generate selectAll() for EACH table in the combination
             combination.tables.forEach { table ->
-                add(SelectAllDirectMethodGenerator(combination, table, schemaPackage))
+                add(SelectAllDirectMethodGenerator(combination, table, schemaPackage).forCombination(combination))
 
                 // For subqueries, also generate selectAll(marker) overload
                 if (table.isSubquery) {
                     val subqueryInfo = data.subqueries.find { it.name == table.name }
                     if (subqueryInfo != null) {
-                        add(SelectAllSubqueryMarkerMethodGenerator(combination, subqueryInfo))
+                        add(SelectAllSubqueryMarkerMethodGenerator(combination, subqueryInfo).forCombination(combination))
                     }
                 }
             }
-            add(SelectAllLambdaMethodGenerator(combination))
+            add(SelectAllLambdaMethodGenerator(combination).forCombination(combination))
         }
 
         // NEW: Generate marker-specific selectAs with deduplication
         // Track which (queryCombination, fromType, markerName, toType) methods we've generated
+        // IMPORTANT: Skip synthetic combinations (Table+Subquery) to avoid code explosion
         val generatedSelectAsMethods = mutableSetOf<String>()
 
-        data.queryCombinations.forEach { queryCombination ->
+        uniqueCombinations.filter { !it.isSynthetic }.forEach { queryCombination ->
             data.markerCombinations.forEach { markerCombination ->
                 // Generate selectAs for each marker in the combination
                 markerCombination.markers.indices.forEach { markerIndex ->
@@ -272,37 +410,37 @@ class GeneratorFactory(
 
                     if (signature !in generatedSelectAsMethods) {
                         generatedSelectAsMethods.add(signature)
-                        add(SelectAsForMarkerGenerator(queryCombination, markerCombination, markerIndex))
+                        add(SelectAsForMarkerGenerator(queryCombination, markerCombination, markerIndex).forCombination(queryCombination))
                     }
                 }
             }
         }
 
-        // Clause methods for each combination
-        data.queryCombinations.forEach { combination ->
-            add(WhereMethodGenerator(combination))
-            add(OrderByMethodGenerator(combination))
-            add(GroupByMethodGenerator(combination))
-            add(LimitMethodGenerator(combination))
-            add(OffsetMethodGenerator(combination))
+        // Clause methods for each combination (deduplicate by table names)
+        uniqueCombinations.forEach { combination ->
+            add(WhereMethodGenerator(combination).forCombination(combination))
+            add(OrderByMethodGenerator(combination).forCombination(combination))
+            add(GroupByMethodGenerator(combination).forCombination(combination))
+            add(LimitMethodGenerator(combination).forCombination(combination))
+            add(OffsetMethodGenerator(combination).forCombination(combination))
         }
 
-        // Subquery methods for each combination
-        data.queryCombinations.forEach { combination ->
-            add(ExistsMethodGenerator(combination))
-            add(NotExistsMethodGenerator(combination))
-            add(ScalarSubqueryMethodGenerator(combination))
+        // Subquery methods for each combination (deduplicate by table names)
+        uniqueCombinations.forEach { combination ->
+            add(ExistsMethodGenerator(combination).forCombination(combination))
+            add(NotExistsMethodGenerator(combination).forCombination(combination))
+            add(ScalarSubqueryMethodGenerator(combination).forCombination(combination))
         }
 
-        // Execute method for each combination
+        // Generate generic execute methods for query combinations
         data.queryCombinations.forEach { combination ->
-            add(ExecuteMethodGenerator(combination))
+            add(ExecuteMethodGenerator(combination).forCombination(combination))
         }
 
-        // Subquery-specific methods
+        // Subquery-specific methods - go to infrastructure file
         data.subqueries.forEach { subquery ->
-            add(FromAliasedMethodGenerator(subquery))
-            add(FromAliasedWithLambdaMethodGenerator(subquery))
+            add(FromAliasedMethodGenerator(subquery).forSubqueryInfrastructureFile())
+            add(FromAliasedWithLambdaMethodGenerator(subquery).forSubqueryInfrastructureFile())
         }
     }
 
@@ -310,65 +448,79 @@ class GeneratorFactory(
      * Phase 6: Result generators (7 types).
      */
     private fun createResultGenerators(): List<CodeGenerator> = buildList {
-        // Query result classes
+        // Query result classes - NO DEDUPLICATION (pattern-specific!)
+        // Each join pattern needs its own result class with correct nullability
         data.queryCombinations.forEach { combination ->
-            add(QueryResultClassGenerator(combination))
-            add(ExecuteQueryResultMethodGenerator(combination))
+            add(QueryResultClassGenerator(combination).forCombination(combination))
+            add(ExecuteQueryResultMethodGenerator(combination).forCombination(combination))
         }
 
         // Selection result classes and execute methods (for marker combinations)
         data.markerCombinations.forEach { markerCombination ->
-            // Generate SelectionResult class for this combination (once per combination)
-            add(SelectionResultClassGenerator(markerCombination))
+            // Generate SelectionResult class for this combination (once per combination) - infrastructure file
+            add(SelectionResultClassGenerator(markerCombination).forSelectionSetsFile())
         }
 
         // Generate execute() methods with deduplication
         // Track which (queryCombination, phantomType, resultClass) methods we've generated
+        // IMPORTANT: Skip synthetic combinations (Table+Subquery) to avoid code explosion
         val generatedExecuteMethods = mutableSetOf<String>()
 
-        data.queryCombinations.forEach { queryCombination ->
+        // Deduplicate by table names for marker-based execute methods
+        val uniqueCombinationsForMarkers = data.queryCombinations
+            .filter { !it.isSynthetic }
+            .distinctBy { combination ->
+                combination.tables.map { it.name }.joinToString("_")
+            }
+
+        uniqueCombinationsForMarkers.forEach { queryCombination ->
             data.markerCombinations.forEach { markerCombination ->
                 val phantomType = "SelectionSet_" + markerCombination.markers.joinToString("_") { it.interfaceName }
                 val signature = "${queryCombination.builderClassName}|$phantomType|${markerCombination.resultClassName}"
 
                 if (signature !in generatedExecuteMethods) {
                     generatedExecuteMethods.add(signature)
-                    add(ExecuteAggregateMethodGenerator(queryCombination, markerCombination))
+                    add(ExecuteAggregateMethodGenerator(queryCombination, markerCombination).forCombination(queryCombination))
                 }
             }
         }
 
         // Hybrid result classes and execute methods (for mixed marker + table selections)
         // Generate for each combination of: marker combination + single table with AllColumnsSelected
+        // IMPORTANT: Skip synthetic combinations to avoid code explosion
 
         // First, generate unique hybrid result classes (deduplicated by marker + table combination)
+        // Only include tables from non-synthetic combinations - infrastructure file
         val generatedHybridClasses = mutableSetOf<String>()
         data.markerCombinations.forEach { markerCombination ->
-            // Get all unique tables across all query combinations
-            val allTables = data.queryCombinations.flatMap { it.tables }.distinctBy { it.name }
+            // Get all unique tables across non-synthetic query combinations
+            val allTables = data.queryCombinations
+                .filter { !it.isSynthetic }
+                .flatMap { it.tables }
+                .distinctBy { it.name }
             allTables.forEach { table ->
                 val classSignature = "${markerCombination.resultClassName}_${table.capitalizedName}"
                 if (classSignature !in generatedHybridClasses) {
                     generatedHybridClasses.add(classSignature)
-                    add(HybridResultClassGenerator(markerCombination, listOf(table)))
+                    add(HybridResultClassGenerator(markerCombination, listOf(table)).forSelectionSetsFile())
                 }
             }
         }
 
-        // Then, generate execute methods for each query combination
+        // Then, generate execute methods for each non-synthetic query combination (deduplicate by table names)
         data.markerCombinations.forEach { markerCombination ->
-            data.queryCombinations.forEach { queryCombination ->
+            uniqueCombinationsForMarkers.forEach { queryCombination ->
                 queryCombination.tables.forEach { table ->
                     // Generate execute method for this hybrid pattern
-                    add(ExecuteHybridMethodGenerator(queryCombination, markerCombination, listOf(table), schemaPackage))
+                    add(ExecuteHybridMethodGenerator(queryCombination, markerCombination, listOf(table), schemaPackage).forCombination(queryCombination))
                 }
             }
         }
 
-        // Subquery result accessors
+        // Subquery result accessors - go to subquery files
         data.subqueries.forEach { subquery ->
-            add(SubqueryResultAccessorGenerator(subquery))
-            add(SubqueryResultAccessorAllGenerator(subquery))
+            add(SubqueryResultAccessorGenerator(subquery).forSubquery(subquery))
+            add(SubqueryResultAccessorAllGenerator(subquery).forSubquery(subquery))
         }
     }
 
@@ -377,10 +529,10 @@ class GeneratorFactory(
      */
     private fun createSubqueryGenerators(): List<CodeGenerator> = buildList {
         data.subqueries.forEach { subquery ->
-            add(SubqueryTableClassGenerator(subquery))
+            add(SubqueryTableClassGenerator(subquery).forSubqueryInfrastructureFile())
         }
 
         // Always generate SubqueryRegistry (even if empty) since aliasAs() methods depend on it
-        add(SubqueryRegistryGenerator(data.subqueries))
+        add(SubqueryRegistryGenerator(data.subqueries).forSubqueryInfrastructureFile())
     }
 }

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Full outer join support for subqueries** - All join types now supported for `.joinAliased()` methods
+  - `.joinAliased()` / `.innerJoinAliased()` - INNER JOIN (existing)
+  - `.leftJoinAliased()` - LEFT OUTER JOIN (existing)
+  - `.rightJoinAliased()` - RIGHT OUTER JOIN ✨ NEW
+  - `.fullJoinAliased()` - FULL OUTER JOIN ✨ NEW
+  - Example:
+    ```kotlin
+    from(Person)
+        .leftJoinAliased(
+            from(Order)
+                .selectAs(OrderUserName) { order.userName }
+                .build()
+                .aliasAs<UsersWithOrders>()
+        ) { person.name eq usersWithOrders.orderUserName }
+        .selectAll(Person)
+        .selectAll(UsersWithOrders)
+        .execute(transaction)
+        .forEach { row ->
+            val name = row.person.name       // Non-nullable (LEFT side)
+            val userName = row.usersWithOrders.orderUserName  // Nullable (RIGHT side)
+        }
+    ```
+  - Subquery properties are nullable to support NULL values in outer joins
+  - Join-type-aware result classes generated for each join pattern (INNER, LEFT, RIGHT, FULL)
+
 ## [0.4.0] - 2026-01-02
 
 ### Changed

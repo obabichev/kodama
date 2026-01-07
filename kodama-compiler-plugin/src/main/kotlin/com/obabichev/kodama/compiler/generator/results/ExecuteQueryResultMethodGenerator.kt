@@ -54,16 +54,25 @@ class ExecuteQueryResultMethodGenerator(
 
     override fun generate(): String = buildString {
         val allColumnsSelected = combination.tables.joinToString(", ") { "AllColumnsSelected" }
-        val resultClassName = "QueryResult_" + combination.tables.joinToString("_") { it.capitalizedName }
+
+        // Include join pattern in result class name for pattern-specific classes
+        val resultClassName = if (combination.joinPattern.isEmpty()) {
+            "QueryResult_" + combination.tables.joinToString("_") { it.capitalizedName }
+        } else {
+            "QueryResult_" + combination.tables.joinToString("_") { it.capitalizedName } + "_" + combination.joinPattern
+        }
+
+        // JP type constraint to match the specific join pattern
+        val jpConstraint = combination.joinPatternTypeName
 
         // Generate unique JVM name to avoid signature clashes
-        val jvmName = "execute_${combination.builderClassName}_AllColumns"
+        val jvmName = "execute_${combination.builderClassName}_AllColumns_${combination.joinPattern.replace("_", "")}"
 
         appendLine("/**")
-        appendLine(" * Execute query with all columns selected (no aggregates).")
+        appendLine(" * Execute query with all columns selected (no aggregates) (join pattern: ${combination.joinPattern.ifEmpty { "NONE" }}).")
         appendLine(" */")
         appendLine("@JvmName(\"$jvmName\")")
-        appendLine("fun ${combination.builderClassName}<$allColumnsSelected, NoAggregates>.execute(")
+        appendLine("fun ${combination.builderClassName}<$allColumnsSelected, NoAggregates, $jpConstraint>.execute(")
         appendLine("    transaction: com.obabichev.kodama.execute.JdbcTransaction")
         appendLine("): com.obabichev.kodama.query.QueryResultIterable<$resultClassName> {")
         appendLine("    val query = this.build()")

@@ -54,13 +54,15 @@ class LeftJoinAliasedMethodGenerator(
     override fun generate(): String = buildString {
         // Build type parameters for source builder
         val sourceSelParams = fromCombination.tables.joinToString(", ") { "${it.capitalizedName}Sel" }
-        val sourceAllParams = "$sourceSelParams, AC : AggCount"
+        val sourceAllParams = "$sourceSelParams, AC : AggCount, SourceJP : JoinPattern"
 
         // Build type parameters for target builder (with subquery)
         val targetSelParams = toCombination.tables.joinToString(", ") {
             if (it.name == subquery.name) "NoColumnsSelected"
             else "${it.capitalizedName}Sel"
         }
+        // Target JP is determined by the join pattern of toCombination
+        val targetJP = toCombination.joinPatternTypeName
         val targetAllParams = "$targetSelParams, AC"
 
         val targetBuilderName = toCombination.builderClassName
@@ -76,10 +78,10 @@ class LeftJoinAliasedMethodGenerator(
         appendLine(" */")
         appendLine("@JvmName(\"$jvmName\")")
         appendLine("inline fun <T, $sourceAllParams>")
-        appendLine("${fromCombination.builderClassName}<$sourceSelParams, AC>.leftJoinAliased(")
+        appendLine("${fromCombination.builderClassName}<$sourceSelParams, AC, SourceJP>.leftJoinAliased(")
         appendLine("    subquery: T,")
         appendLine("    crossinline condition: $contextClassName.() -> Expression")
-        appendLine("): $targetBuilderName<$targetAllParams>")
+        appendLine("): $targetBuilderName<$targetAllParams, $targetJP>")
         appendLine("    where T : ${subquery.name} {")
         appendLine("    val subqueryTable = subquery as $subqueryTableClassName")
         appendLine("    state._subqueryTables[subqueryTable.alias] = subqueryTable")

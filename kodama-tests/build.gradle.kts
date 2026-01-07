@@ -23,8 +23,9 @@ dependencies {
     implementation(kotlin("test-junit"))
 
     implementation(project(":kodama-core"))
-    // KSP processor is now auto-configured by Kodama
-    // ksp(project(":kodama-ksp-processor"))
+    // For internal development, explicitly add KSP processor as project dependency
+    // KSP will automatically scan schema files and generate kodama-ksp-metadata.json
+    ksp(project(":kodama-ksp-processor"))
 
     implementation(libs.slf4j)
     implementation(libs.log4j.slf4j.impl)
@@ -34,4 +35,14 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
 
     testCompileOnly(libs.postgre)
+}
+
+// Ensure Kodama code generation runs after KSP discovers tables
+tasks.named("generateKodamaTableMetadata") {
+    dependsOn("kspKotlin")
+}
+
+// Ensure test compilation depends on query extensions generation
+tasks.named("compileTestKotlin") {
+    dependsOn("generateKodamaQueryExtensions")
 }

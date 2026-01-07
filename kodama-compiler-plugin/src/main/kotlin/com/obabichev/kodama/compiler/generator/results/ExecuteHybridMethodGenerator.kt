@@ -79,6 +79,9 @@ class ExecuteHybridMethodGenerator(
             }
         }
 
+        // JP type constraint to match the specific join pattern (makes this MORE specific than generic execute)
+        val jpConstraint = queryCombination.joinPatternTypeName
+
         val typeParamsStr = if (typeParams.isNotEmpty()) "<${typeParams.joinToString(", ")}>" else ""
         val builderTypeArgsStr = builderTypeArgs.joinToString(", ")
         val phantomType = selectionSetType
@@ -93,7 +96,7 @@ class ExecuteHybridMethodGenerator(
         appendLine(" */")
         appendLine("@JvmName(\"$jvmName\")")
         appendLine("fun $typeParamsStr")
-        appendLine("${queryCombination.builderClassName}<$builderTypeArgsStr, $phantomType>.execute(")
+        appendLine("${queryCombination.builderClassName}<$builderTypeArgsStr, $phantomType, $jpConstraint>.execute(")
         appendLine("    transaction: com.obabichev.kodama.execute.JdbcTransaction")
         appendLine("): com.obabichev.kodama.query.QueryResultIterable<$resultClassName> {")
         appendLine("    val query = this.build()")
@@ -108,7 +111,15 @@ class ExecuteHybridMethodGenerator(
 
         // Create table accessors
         allColumnsTables.forEach { table ->
-            appendLine("        val ${table.camelCaseName}Accessor = ${table.capitalizedName}ResultAccessor_All(")
+            // For hybrid results (single table + markers), table is always the base table
+            // Use NonNull variant unless it's a subquery (subqueries don't have variants yet)
+            val accessorVariant = if (table.isSubquery) {
+                "${table.capitalizedName}ResultAccessor_All"
+            } else {
+                "${table.capitalizedName}ResultAccessor_All_NonNull"
+            }
+
+            appendLine("        val ${table.camelCaseName}Accessor = $accessorVariant(")
             appendLine("            rs,")
             appendLine("            relations")
 

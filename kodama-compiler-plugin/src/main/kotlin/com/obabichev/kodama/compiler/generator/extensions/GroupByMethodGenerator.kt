@@ -47,7 +47,7 @@ class GroupByMethodGenerator(
     override fun generate(): String = buildString {
         // Build type parameters
         val selectionParams = combination.tables.joinToString(", ") { "${it.capitalizedName}Sel" }
-        val allParams = "$selectionParams, AC : AggCount"
+        val allParams = "$selectionParams, AC : AggCount, JP : JoinPattern"
 
         val contextClassName = "GroupByContext_" + combination.tables.joinToString("_") { it.capitalizedName }
 
@@ -55,9 +55,9 @@ class GroupByMethodGenerator(
         appendLine(" * Add GROUP BY clause for aggregating results.")
         appendLine(" */")
         appendLine("inline fun <$allParams>")
-        appendLine("${combination.builderClassName}<$selectionParams, AC>.groupBy(")
+        appendLine("${combination.builderClassName}<$selectionParams, AC, JP>.groupBy(")
         appendLine("    crossinline selector: $contextClassName.() -> Column<*>")
-        appendLine("): ${combination.builderClassName}<$selectionParams, AC> {")
+        appendLine("): ${combination.builderClassName}<$selectionParams, AC, JP> {")
         appendLine("    val context = $contextClassName(state)")
         appendLine("    val column = context.selector()")
         appendLine("    state._groupBy.add(column)")
@@ -68,6 +68,7 @@ class GroupByMethodGenerator(
     override fun requiredImports(): Set<String> {
         return setOf(
             "com.obabichev.kodama.query.AggCount",
+            "com.obabichev.kodama.query.JoinPattern",
             "com.obabichev.kodama.schema.Column"
         )
     }

@@ -44,20 +44,20 @@ class SelectAllDirectMethodGenerator(
     override fun generate(): String = buildString {
         // Build type parameters: before selection (source)
         val sourceSelParams = combination.tables.joinToString(", ") { "${it.capitalizedName}Sel" }
-        val sourceAllParams = "$sourceSelParams, AC : AggCount"
+        val sourceAllParams = "$sourceSelParams, AC : AggCount, JP : JoinPattern"
 
         // Build type parameters: after selection (target)
         val targetSelParams = combination.tables.joinToString(", ") {
             if (it.name == targetTable.name) "AllColumnsSelected"
             else "${it.capitalizedName}Sel"
         }
-        val targetAllParams = "$targetSelParams, AC"
+        val targetAllParams = "$targetSelParams, AC, JP"
 
         appendLine("/**")
         appendLine(" * Select all columns from ${targetTable.capitalizedName}.")
         appendLine(" */")
         appendLine("fun <$sourceAllParams>")
-        appendLine("${combination.builderClassName}<$sourceSelParams, AC>.selectAll(")
+        appendLine("${combination.builderClassName}<$sourceSelParams, AC, JP>.selectAll(")
 
         // Different parameter type for subqueries vs regular tables
         if (targetTable.isSubquery) {
@@ -76,6 +76,7 @@ class SelectAllDirectMethodGenerator(
     override fun requiredImports(): Set<String> {
         return setOf(
             "com.obabichev.kodama.query.AggCount",
+            "com.obabichev.kodama.query.JoinPattern",
             "com.obabichev.kodama.query.AllColumnsSelected"
         )
     }

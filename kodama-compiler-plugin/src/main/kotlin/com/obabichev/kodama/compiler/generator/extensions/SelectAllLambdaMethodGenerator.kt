@@ -44,11 +44,11 @@ class SelectAllLambdaMethodGenerator(
     override fun generate(): String = buildString {
         // Build type parameters
         val selectionParams = combination.tables.joinToString(", ") { "${it.capitalizedName}Sel" }
-        val sourceAllParams = "$selectionParams, AC : AggCount"
+        val sourceAllParams = "$selectionParams, AC : AggCount, JP : JoinPattern"
 
         // For simplification, mark all as AllColumnsSelected after selectAll
         val targetSelParams = combination.tables.joinToString(", ") { "AllColumnsSelected" }
-        val targetAllParams = "$targetSelParams, AC"
+        val targetAllParams = "$targetSelParams, AC, JP"
 
         val contextClassName = "SelectAllContext_" + combination.tables.joinToString("_") { it.capitalizedName }
 
@@ -56,7 +56,7 @@ class SelectAllLambdaMethodGenerator(
         appendLine(" * Select all columns from a table using lambda syntax.")
         appendLine(" */")
         appendLine("inline fun <$sourceAllParams>")
-        appendLine("${combination.builderClassName}<$selectionParams, AC>.selectAll(")
+        appendLine("${combination.builderClassName}<$selectionParams, AC, JP>.selectAll(")
         appendLine("    crossinline selector: $contextClassName.() -> AllColumnsMarker")
         appendLine("): ${combination.builderClassName}<$targetAllParams> {")
         appendLine("    val context = $contextClassName(state)")
@@ -69,6 +69,7 @@ class SelectAllLambdaMethodGenerator(
     override fun requiredImports(): Set<String> {
         return setOf(
             "com.obabichev.kodama.query.AggCount",
+            "com.obabichev.kodama.query.JoinPattern",
             "com.obabichev.kodama.query.AllColumnsSelected"
         )
     }

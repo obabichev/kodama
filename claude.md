@@ -142,7 +142,7 @@ Provides DSL: `integer()`, `varchar()`, `primaryKey()`
 
 ### Query Building
 - ✅ SELECT queries with type-safe column selection
-- ✅ INNER JOIN with type-safe conditions
+- ✅ All SQL JOIN types: `join()` / `innerJoin()`, `leftJoin()`, `rightJoin()`, `fullJoin()`
 - ✅ Multiple joins (A → B → C)
 - ✅ WHERE clause with `eq` operator
 - ✅ ORDER BY clause with `.asc()` and `.desc()`
@@ -161,6 +161,18 @@ Provides DSL: `integer()`, `varchar()`, `primaryKey()`
 - ✅ Explicit GROUP BY with chainable `.groupBy { column }` syntax
 - ✅ Type-safe result accessors with proper type inference
 
+### Subqueries
+- ✅ Subqueries in FROM clause with `fromAliased(Marker) { ... }`
+- ✅ Subqueries in JOIN clause with `.joinAliased()` methods
+- ✅ All join types for subqueries: `joinAliased()`, `leftJoinAliased()`, `rightJoinAliased()`, `fullJoinAliased()`
+- ✅ Type-safe marker-based subquery definitions: `.aliasAs<Marker>()`
+- ✅ Automatic nullable properties for subquery columns (to handle outer joins)
+- ✅ Join-type-aware nullability:
+  - INNER JOIN: Both sides non-nullable
+  - LEFT JOIN: Left non-nullable, right nullable
+  - RIGHT JOIN: Left nullable, right non-nullable
+  - FULL OUTER JOIN: Both sides nullable
+
 ### Data Manipulation
 - ✅ INSERT statements with compile-time column validation
   - All columns required as parameters
@@ -169,11 +181,8 @@ Provides DSL: `integer()`, `varchar()`, `primaryKey()`
 
 ## Current Limitations
 
-- Only `eq` operator (no gt, lt, like, etc.)
-- No AND/OR boolean combinations in WHERE
 - No HAVING clause for aggregate filtering
 - No UPDATE, DELETE statements
-- Only INNER JOIN (no LEFT/RIGHT/FULL OUTER)
 
 See `ROADMAP.md` for planned features.
 
@@ -222,6 +231,56 @@ from(Person)
     .selectAll(Person)
     .selectAll(Order)
     .selectAll(Profile)
+```
+
+### Join Types
+
+#### INNER JOIN (or join)
+```kotlin
+// Returns only matching rows from both tables
+from(Person)
+    .innerJoin(Order) { order.userName eq person.name }
+    .selectAll(Person)
+    .selectAll(Order)
+```
+
+**Note:** `.join()` and `.innerJoin()` are equivalent - use whichever you prefer.
+
+#### LEFT JOIN
+```kotlin
+// Returns all persons, including those without orders
+from(Person)
+    .leftJoin(Order) { order.userName eq person.name }
+    .selectAll(Person)
+    .selectAll(Order)
+    .execute(transaction)
+    .forEach { row ->
+        val name = row.person.name as String
+        val product = row.order.product as? String  // Nullable for persons without orders
+    }
+```
+
+#### RIGHT JOIN
+```kotlin
+// Returns all orders, including orphaned orders (no matching person)
+from(Person)
+    .rightJoin(Order) { order.userName eq person.name }
+    .selectAll(Person)
+    .selectAll(Order)
+```
+
+#### FULL OUTER JOIN
+```kotlin
+// Returns all rows from both tables, with NULLs where there's no match
+from(Person)
+    .fullJoin(Order) { order.userName eq person.name }
+    .selectAll(Person)
+    .selectAll(Order)
+    .execute(transaction)
+    .forEach { row ->
+        val personName = row.person.name as? String  // Nullable
+        val orderProduct = row.order.product as? String  // Nullable
+    }
 ```
 
 ### Execution
@@ -492,14 +551,18 @@ Generated code is now placed in `{schemaPackage}.generated` instead of hardcoded
   - QueryAggregateTests (3 tests)
   - InsertTests (5 tests)
   - QueryOrderByTests (6 tests)
-  - QueryLimitOffsetTests (10 tests) ✅ NEW
+  - QueryLimitOffsetTests (10 tests)
+  - JoinTypesTests (7 tests) ✅ Tests all 4 join types
+  - SubqueryTests (10 tests) ✅ Tests subqueries with all join types
   - Entity Layer tests
 - **Completed Features**:
   - ✅ SELECT with type-safe column selection
-  - ✅ INNER JOIN with multiple tables
+  - ✅ All SQL join types: INNER, LEFT, RIGHT, FULL (for both tables and subqueries) ✅ COMPLETE
+  - ✅ Join-type-aware nullability - INNER returns non-nullable, outer joins return appropriate nullability
+  - ✅ Subqueries in FROM and JOIN clauses with all join types ✅ NEW
   - ✅ WHERE with eq operator
   - ✅ ORDER BY with asc/desc
-  - ✅ LIMIT and OFFSET for pagination ✅ NEW (v0.4.0)
+  - ✅ LIMIT and OFFSET for pagination
   - ✅ Aggregate functions (COUNT, SUM, AVG, MIN, MAX)
   - ✅ Explicit GROUP BY with chainable `.groupBy { column }` syntax
   - ✅ INSERT statements with compile-time validation
@@ -507,5 +570,6 @@ Generated code is now placed in `{schemaPackage}.generated` instead of hardcoded
   - ✅ Date/Time column types (DATE, TIME, TIMESTAMP, TIMESTAMPTZ, TIMETZ, INTERVAL)
   - ✅ Entity Layer with interface-based entities
   - ✅ One-to-many and many-to-one relationships
-- **Documentation updated**: README, ROADMAP, CLAUDE.md with LIMIT/OFFSET examples
+- **Documentation updated**: README, CHANGELOG, CLAUDE.md with outer join and subquery examples
+- **Code Quality**: Removed 13 redundant casts/mapNotNull calls - generated accessors have correct types
 - **Ready for next features**: AND/OR combinations, comparison operators, HAVING (see ROADMAP.md Phase 5)

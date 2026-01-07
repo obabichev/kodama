@@ -50,7 +50,7 @@ class FromAliasedMethodGenerator(
         appendLine(" */")
         appendLine("inline fun <reified T> fromAliased(")
         appendLine("    marker: T")
-        appendLine("): $builderClassName<NoColumnsSelected, NoAggregates>")
+        appendLine("): $builderClassName<NoColumnsSelected, NoAggregates, JoinPattern_NONE>")
         appendLine("    where T : ${subqueryInfo.name} {")
         appendLine("    val subqueryTable = SubqueryRegistry.getOrCreate<T>()")
         appendLine("    val state = QueryState()")

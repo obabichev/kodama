@@ -45,7 +45,7 @@ class SelectMethodGenerator(
     override fun generate(): String = buildString {
         // Build type parameters
         val selectionParams = combination.tables.joinToString(", ") { "${it.capitalizedName}Sel" }
-        val allParams = "$selectionParams, AC : AggCount, TTable, TCol"
+        val allParams = "$selectionParams, AC : AggCount, JP : JoinPattern, TTable, TCol"
 
         val contextClassName = "SelectContext_" + combination.tables.joinToString("_") { it.capitalizedName }
 
@@ -53,9 +53,9 @@ class SelectMethodGenerator(
         appendLine(" * Select a single column or expression.")
         appendLine(" */")
         appendLine("inline fun <$allParams>")
-        appendLine("${combination.builderClassName}<$selectionParams, AC>.select(")
+        appendLine("${combination.builderClassName}<$selectionParams, AC, JP>.select(")
         appendLine("    crossinline selector: $contextClassName.() -> TypedColumn<*, TTable, TCol>")
-        appendLine("): ${combination.builderClassName}<$selectionParams, AC> {")
+        appendLine("): ${combination.builderClassName}<$selectionParams, AC, JP> {")
         appendLine("    val context = $contextClassName(state)")
         appendLine("    val column = context.selector()")
         appendLine("    state._selectedColumns.add(column.column)")
@@ -66,6 +66,7 @@ class SelectMethodGenerator(
     override fun requiredImports(): Set<String> {
         return setOf(
             "com.obabichev.kodama.query.AggCount",
+            "com.obabichev.kodama.query.JoinPattern",
             "com.obabichev.kodama.components.TypedColumn"
         )
     }

@@ -49,7 +49,7 @@ class FromAliasedWithLambdaMethodGenerator(
         appendLine("inline fun <reified T> fromAliased(")
         appendLine("    marker: T,")
         appendLine("    queryBuilder: () -> Query")
-        appendLine("): $builderClassName<NoColumnsSelected, NoAggregates>")
+        appendLine("): $builderClassName<NoColumnsSelected, NoAggregates, JoinPattern_NONE>")
         appendLine("    where T : ${subqueryInfo.name} {")
         appendLine("    val query = queryBuilder()")
         appendLine("    val subqueryTable = SubqueryRegistry.createSubquery(T::class, query) as $subqueryTableClassName")

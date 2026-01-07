@@ -84,4 +84,27 @@ interface CodeGenerator {
      * @return List of generators that must be generated before this one
      */
     fun dependencies(): List<CodeGenerator> = emptyList()
+
+    /**
+     * Get the target file path for this generator's output (relative to generated package).
+     *
+     * This enables multi-file generation where code is organized across multiple files
+     * instead of a single large file.
+     *
+     * Examples:
+     * - `_infrastructure/Markers.kt` - marker interfaces
+     * - `single_table/PersonQuery.kt` - Person table queries
+     * - `combinations/PersonOrderQuery.kt` - Person+Order combination
+     * - `subqueries/UsersWithOrdersQuery.kt` - UsersWithOrders subquery
+     * - `synthetic/PersonUsersWithOrdersQuery.kt` - synthetic combinations
+     *
+     * The MultiFileGenerator will group generators by target file and generate
+     * one file per group with appropriate package and imports.
+     *
+     * Default implementation returns "_default.kt" which should be overridden by
+     * GeneratorWithTargetFile wrapper or by implementing classes.
+     *
+     * @return Relative file path (e.g., "single_table/PersonQuery.kt")
+     */
+    fun targetFile(): String = "_default.kt"
 }
