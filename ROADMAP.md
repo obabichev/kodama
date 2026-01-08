@@ -36,6 +36,40 @@ Successfully refactored the code generation system from a monolithic 242 KB file
 
 ---
 
+### ✅ Compile-Time Safety for selectAll()
+
+**Status:** Complete
+**Impact:** Enhanced type safety
+
+Implemented compile-time validation for `selectAll()` method using phantom type constraints:
+
+**What Changed:**
+- ✅ **Removed generic selectAll(table)**: Eliminated runtime validation
+- ✅ **Generated table-specific extensions**: ~285 type-safe selectAll methods
+- ✅ **Phantom type constraints**: Only available tables can be selected
+- ✅ **Compile-time errors**: Invalid table selections caught by compiler
+
+**Example:**
+```kotlin
+from(Author)
+    .join(Book) { book.authorId eq author.id }
+    .selectAll(Author)  // ✅ Compiles - Author in query
+    .selectAll(Book)    // ✅ Compiles - Book in query
+    .selectAll(Order)   // ❌ Compile error - Order not in query!
+```
+
+**Technical Details:**
+- Generated `selectAll` extensions with phantom type constraints
+- Used `@JvmName` annotations to prevent signature clashes
+- Growth remains linear: O(N × M) where M = max tables (5)
+
+**Known Limitation:**
+- Multi-table query result accessors use nullable types for safety
+- This is conservative but handles all join types (INNER/LEFT/RIGHT/FULL)
+- Future improvement: Encode join types in phantom types for full nullability precision
+
+---
+
 ## DSL Layer (Query Building)
 
 ### High Priority Features
@@ -98,9 +132,9 @@ delete(Person)
 
 ---
 
-#### 3. LEFT/RIGHT/FULL OUTER JOIN
+#### 3. ✅ LEFT/RIGHT/FULL OUTER JOIN
 
-**Status:** Not implemented (INNER JOIN only)
+**Status:** ✅ Implemented
 **Priority:** ⭐⭐ High
 
 Outer joins for optional relationships:
@@ -109,22 +143,24 @@ Outer joins for optional relationships:
 from(Person)
     .leftJoin(Order) { order.userName eq person.name }
     .selectAll(Person)
-    .selectAll(Order)  // Order columns may be null
+    .selectAll(Order)  // Order columns are nullable
 
-// Explicit type parameter
+// Also available: rightJoin(), fullJoin(), innerJoin()
 from(Person)
-    .join(Order, type = JoinType.LEFT_OUTER) {
-        order.userName eq person.name
-    }
+    .rightJoin(Order) { order.userName eq person.name }
+    .selectAll(Person)  // Person columns are nullable
+    .selectAll(Order)
 ```
 
-**Implementation Tasks:**
+**Completed:**
 
-- Add `JoinType.LEFT_OUTER`, `RIGHT_OUTER`, `FULL_OUTER` to enum
-- Add convenience methods: `leftJoin()`, `rightJoin()`, `fullJoin()`
-- Handle nullable result types for outer joins
-- Update SQL generation
-- Add tests for all join types
+- ✅ Added `JoinType.LEFT`, `RIGHT`, `FULL`, `INNER` enum values
+- ✅ Added convenience methods: `leftJoin()`, `rightJoin()`, `fullJoin()`, `innerJoin()`
+- ✅ Nullable result types for all tables in multi-table queries (conservative)
+- ✅ SQL generation for all join types
+- ✅ Comprehensive tests for all join types
+
+**Known Limitation:** Result accessors use nullable types for all multi-table queries to safely handle all join types. Future improvement: Encode join type in phantom types for precise nullability.
 
 ---
 

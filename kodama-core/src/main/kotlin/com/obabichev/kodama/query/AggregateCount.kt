@@ -108,8 +108,10 @@ interface SelectionState : AggCount
 
 /**
  * Marker indicating no selections have been made yet.
+ * @deprecated Use NoSelections from SelectionSet system instead
  */
-object NoSelections : SelectionState
+@Deprecated("Use NoSelections from SelectionSet system", ReplaceWith("NoSelections"))
+object OldNoSelections : SelectionState
 
 /**
  * Marker indicating exactly 1 selection has been made.

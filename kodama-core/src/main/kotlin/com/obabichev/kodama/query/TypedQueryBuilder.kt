@@ -191,6 +191,7 @@ class QueryState {
     var _offset: Int? = null
     val relations = RelationsContainer()
     val _subqueryTables: MutableMap<String, Table> = mutableMapOf()  // Track subquery tables by SQL name
+    val _markerSelections: MutableMap<kotlin.reflect.KClass<*>, Expression> = mutableMapOf()  // Track marker selections
 
     /**
      * Apply a selection marker to the query state
@@ -206,6 +207,69 @@ class QueryState {
         if (marker.isAggregate && marker is AggregateSelection) {
             _aggregateSelections.add(marker.aggregateFunction)
         }
+    }
+
+    /**
+     * Add a marker-based selection (e.g., .selectAs(TotalRevenue) { sum(order.cost) })
+     */
+    fun addMarkerSelection(markerClass: kotlin.reflect.KClass<*>, expression: Expression) {
+        _markerSelections[markerClass] = expression
+
+        // Set the SQL alias based on the marker name (PascalCase -> camelCase)
+        // ColumnSelectable will convert camelCase to snake_case for SQL
+        val markerName = markerClass.simpleName ?: throw IllegalStateException("Marker must have a name")
+        val camelCaseAlias = markerName.replaceFirstChar { it.lowercase() }
+
+        // Add to appropriate selection list based on expression type
+        when (expression) {
+            is AggregateFunction<*> -> {
+                // For aggregates, use snake_case alias directly
+                val sqlAlias = camelCaseAlias
+                    .replace(Regex("([a-z])([A-Z])"), "$1_$2")
+                    .lowercase()
+                expression.alias(sqlAlias)
+                _aggregateSelections.add(expression)
+            }
+            is TypedColumn<*, *, *> -> {
+                // Add as ColumnSelectable with proper alias
+                _selectables.add(ColumnSelectable(camelCaseAlias, expression.column))
+            }
+            is Column<*> -> {
+                // Add as ColumnSelectable with proper alias
+                _selectables.add(ColumnSelectable(camelCaseAlias, expression))
+            }
+            else -> {
+                // For general expressions (comparisons, arithmetic, etc.)
+                // Convert to snake_case for SQL alias consistency
+                val sqlAlias = camelCaseAlias
+                    .replace(Regex("([a-z])([A-Z])"), "$1_$2")
+                    .lowercase()
+                _selectables.add(ExpressionSelectable(sqlAlias, expression))
+            }
+        }
+    }
+
+    /**
+     * Get the value for a selected marker from the result set.
+     * Used by generated marker accessor extensions.
+     */
+    fun getMarkerValue(markerClass: kotlin.reflect.KClass<*>, resultSet: java.sql.ResultSet): Any? {
+        // Find the expression that was selected with this marker
+        val expression = _markerSelections[markerClass]
+
+        // Get the marker name and convert to camelCase accessor name
+        val markerName = markerClass.simpleName ?: throw IllegalStateException("Marker must have a name")
+        val accessorName = markerName.replaceFirstChar { it.lowercase() }
+
+        // Read the value from the result set
+        // The SQL alias was set as snake_case version of the marker name
+        val sqlAlias = markerName
+            .replaceFirstChar { it.lowercase() }
+            .replace(Regex("([a-z])([A-Z])"), "$1_$2")
+            .lowercase()
+
+        // Get the value from result set
+        return resultSet.getObject(sqlAlias)
     }
 
     /**

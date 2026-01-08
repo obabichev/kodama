@@ -24,7 +24,8 @@ class InsertTests : DatabaseTest() {
                 id = 100,
                 userName = "testuser",
                 product = "Tablet",
-                cost = 500
+                cost = 500,
+                companyId = null
             )
 
             // Verify insert was successful
@@ -112,7 +113,8 @@ class InsertTests : DatabaseTest() {
                 id = 400,
                 userName = "resulttest",
                 product = "Test Product",
-                cost = 999
+                cost = 999,
+                companyId = null
             )
 
             // Test InsertResult properties

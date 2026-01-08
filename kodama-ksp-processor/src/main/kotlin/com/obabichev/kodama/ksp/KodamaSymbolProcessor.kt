@@ -3,10 +3,11 @@ package com.obabichev.kodama.ksp
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.*
 import com.obabichev.kodama.ksp.model.KspTableModel
+import com.obabichev.kodama.ksp.model.TableWithRelationships
 
 /**
  * Main KSP processor for Kodama.
- * Discovers Table object declarations and writes metadata to JSON file.
+ * Discovers Table object declarations, extracts relationships, and generates code.
  */
 class KodamaSymbolProcessor(
     private val codeGenerator: CodeGenerator,
@@ -15,6 +16,9 @@ class KodamaSymbolProcessor(
 ) : SymbolProcessor {
 
     private val discoveredTables = mutableListOf<KspTableModel>()
+    private val tablesWithRelationships = mutableListOf<TableWithRelationships>()
+    private val relationshipExtractor = RelationshipExtractor(logger)
+    private val canJoinGenerator = CanJoinGenerator(codeGenerator, logger)
     private lateinit var resolver: Resolver
 
     override fun process(resolver: Resolver): List<KSAnnotated> {
@@ -30,14 +34,32 @@ class KodamaSymbolProcessor(
                     val table = extractTableInfo(tableClass)
                     discoveredTables.add(table)
                     logger.info("Kodama KSP: Discovered table: ${table.qualifiedName}")
+
+                    // Also extract relationships from this table
+                    val relationships = relationshipExtractor.extractRelationships(tableClass)
+                    if (relationships.isNotEmpty()) {
+                        tablesWithRelationships.add(
+                            TableWithRelationships(table, relationships)
+                        )
+                        logger.info("Kodama KSP: Table ${table.name} has ${relationships.size} relationship(s)")
+                    }
                 }
         }
 
         logger.info("Kodama KSP: Found ${discoveredTables.size} table(s)")
+        logger.info("Kodama KSP: Found ${tablesWithRelationships.size} table(s) with relationships")
 
         // Write metadata to JSON file
         if (discoveredTables.isNotEmpty()) {
             writeMetadataFile()
+        }
+
+        // Generate CanJoin instances
+        if (tablesWithRelationships.isNotEmpty()) {
+            val targetPackage = tablesWithRelationships.firstOrNull()?.table?.packageName
+                ?: "com.obabichev.kodama.generated"
+
+            canJoinGenerator.generateCanJoinInstances(tablesWithRelationships, targetPackage)
         }
 
         // No deferred symbols

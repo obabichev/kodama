@@ -1,12 +1,18 @@
 # Kodama Compiler Plugin - Architecture
 
+> **⚠️ OBSOLETE DOCUMENTATION**
+> This document describes an earlier/alternative architecture design that has been superseded by the current phantom types implementation.
+> Many components referenced here (Scanner layer, SelectionPatternScanner, AggregateScanner, CodegenOrchestrator) have been removed or replaced.
+> This file is kept for historical reference only.
+> **Last Updated:** Pre-phantom types (before 2026-01)
+
 ## Overview
 
 This document describes the modular architecture implemented for the Kodama compiler plugin's code generation system.
 
 ## Current Status
 
-**Architecture Phase: Partially Complete**
+**Architecture Phase: Partially Complete (OBSOLETE - See warning above)**
 
 The new architecture has been designed and core components have been implemented with unit tests demonstrating testability. However, the architecture is not yet fully integrated because some generators are still missing.
 

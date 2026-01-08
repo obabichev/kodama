@@ -38,7 +38,7 @@ class JoinTypesTests : DatabaseTest() {
 
         withConnection {
             val results = queryBuilder.execute(this)
-            val names = results.map { it.person.name }.toList().sorted()
+            val names = results.mapNotNull { it.person.name }.sorted()
 
             // INNER JOIN: Only rows where both tables match
             // alice appears twice (2 orders), bob doesn't appear (no orders), charlie doesn't appear (no person)
@@ -106,7 +106,7 @@ class JoinTypesTests : DatabaseTest() {
             // Bob's order fields should be null
             val bobData = data.first { it.first == "bob" }
             // Order columns are nullable for persons without orders
-            assertEquals(null, bobData.second, "Bob should have no order product")
+            assertEquals<String?>(null, bobData.second, "Bob should have no order product")
         }
     }
 
@@ -142,7 +142,7 @@ class JoinTypesTests : DatabaseTest() {
             // Charlie's order should have null person fields
             val charlieData = data.first { it.second == "charlie" }
             // Person columns are nullable for orders without persons
-            assertEquals(null, charlieData.third, "Charlie's order should have no person")
+            assertEquals<String?>(null, charlieData.third, "Charlie's order should have no person")
         }
     }
 
@@ -204,7 +204,7 @@ class JoinTypesTests : DatabaseTest() {
 
         withConnection {
             val results = queryBuilder.execute(this)
-            val products = results.map { it.order.product }.toList().sorted()
+            val products = results.mapNotNull { it.order.product }.sorted()
 
             // Should only return expensive orders (Laptop, Keyboard)
             assertEquals(2, products.size)
@@ -231,7 +231,7 @@ class JoinTypesTests : DatabaseTest() {
 
         withConnection {
             val results = queryBuilder.execute(this)
-            val products = results.map { it.order.product }.toList()
+            val products = results.mapNotNull { it.order.product }
 
             // Should be ordered by cost descending
             assertEquals(listOf("Laptop", "Keyboard", "Mouse"), products)

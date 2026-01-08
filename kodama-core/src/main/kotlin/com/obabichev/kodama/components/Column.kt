@@ -1,5 +1,7 @@
 package com.obabichev.kodama.components
 
+import com.obabichev.kodama.components.expression.Expression
+import com.obabichev.kodama.query.QueryArgument
 import com.obabichev.kodama.schema.GenerationStrategy
 
 /**
@@ -13,7 +15,10 @@ open class Column<T>(
     val type: ColumnType<T>,
     val nullable: Boolean = true,  // Default to nullable for safety
     val generationStrategy: GenerationStrategy = GenerationStrategy.ClientProvided
-) {
+) : Expression {
+    override fun toSql(): String = "${relation.name}.$name"
+
+    override fun arguments(): List<QueryArgument<*>> = emptyList()
 }
 
 /**
@@ -29,8 +34,12 @@ open class Column<T>(
  */
 interface SelectionMarker
 
-class TypedColumn<T, TableMarker, ColumnMarker>(val column: Column<T>) : SelectionMarker {
+class TypedColumn<T, TableMarker, ColumnMarker>(val column: Column<T>) : SelectionMarker, Expression {
     val name: String get() = column.name
     val relation: Relation get() = column.relation
     val type: ColumnType<T> get() = column.type
+
+    override fun toSql(): String = column.toSql()
+
+    override fun arguments(): List<QueryArgument<*>> = column.arguments()
 }

@@ -34,7 +34,7 @@ class SubqueryAccessorGenerator(
         // Generate typed column properties
         subqueryInfo.columns.forEach { column ->
             val nullMarker = if (column.isNullable) "?" else ""
-            val columnMarker = "${column.capitalizedName}<${column.kotlinType}$nullMarker>"
+            val columnMarker = column.capitalizedName  // No type parameters on markers anymore
             appendLine("    val ${column.propertyName}: com.obabichev.kodama.components.TypedColumn<${column.kotlinType}$nullMarker, ${subqueryInfo.name}, $columnMarker>")
             appendLine("        get() = com.obabichev.kodama.components.TypedColumn(tableAccessor.table.allColumns().find { it.name == \"${column.sqlColumnName}\" }!! as Column<${column.kotlinType}$nullMarker>)")
             appendLine()

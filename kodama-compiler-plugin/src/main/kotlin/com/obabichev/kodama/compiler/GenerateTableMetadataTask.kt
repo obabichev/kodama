@@ -322,20 +322,21 @@ abstract class GenerateTableMetadataTask : DefaultTask() {
             appendLine()
         }
 
-        // from() Entry Point Functions
+        // from() Entry Point Functions (Phantom Types)
         appendLine("// ============================================================================")
-        appendLine("// from() Entry Point Functions (Phase 1)")
+        appendLine("// from() Entry Point Functions (Phantom Types)")
         appendLine("// ============================================================================")
         appendLine()
 
         tables.forEach { table ->
             appendLine("/**")
-            appendLine(" * Create a query starting from ${table.name} table")
+            appendLine(" * Create a query starting from ${table.name} table using phantom types.")
+            appendLine(" * Returns QueryBuilder_1<${table.name}Marker, NoSelections> for type-safe single-table queries.")
             appendLine(" */")
-            appendLine("fun from(table: $schemaPkg.${table.name}): AfterFromQueryBuilder_${table.name}<NoColumnsSelected, NoSelections, JoinPattern_NONE> {")
+            appendLine("fun from(table: $schemaPkg.${table.name}): $genPkg.QueryBuilder_1<$genPkg.${table.name}Marker, $genPkg.NoSelections> {")
             appendLine("    val state = QueryState()")
             appendLine("    state._from = state.relations.relation(table)")
-            appendLine("    return AfterFromQueryBuilder_${table.name}(state)")
+            appendLine("    return $genPkg.QueryBuilder_1(state)")
             appendLine("}")
             appendLine()
         }

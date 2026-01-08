@@ -45,8 +45,7 @@ class DataTransformer(
         val tables: List<TableInfo>,
         val queryCombinations: List<QueryCombinationInfo>,
         val subqueries: List<SubqueryInfo>,
-        val markers: List<MarkerInfo>,
-        val markerCombinations: List<MarkerCombinationInfo>
+        val markers: List<MarkerInfo>
     )
 
     /**
@@ -79,14 +78,12 @@ class DataTransformer(
         val allTablesForLookup = tables + subqueryTables
         val queryCombinations = transformQueryCombinations(allTablesForLookup)
         val markers = transformMarkers()
-        val markerCombinations = transformMarkerCombinations(markers)
 
         return TransformedData(
             tables = tables,
             queryCombinations = queryCombinations,
             subqueries = subqueries,
-            markers = markers,
-            markerCombinations = markerCombinations
+            markers = markers
         )
     }
 
@@ -284,25 +281,5 @@ class DataTransformer(
         }
     }
 
-    /**
-     * Transforms marker combination patterns into MarkerCombinationInfo objects.
-     */
-    @Suppress("UNCHECKED_CAST")
-    private fun transformMarkerCombinations(allMarkers: List<MarkerInfo>): List<MarkerCombinationInfo> {
-        val combinationsData = discoveredData["markerCombinations"] as? List<List<String>> ?: emptyList()
-        val markerMap = allMarkers.associateBy { it.interfaceName }
-
-        return combinationsData
-            .map { markerNames ->
-                val markers = markerNames.mapNotNull { markerMap[it] }
-                if (markers.isNotEmpty()) {
-                    MarkerCombinationInfo(markers)
-                } else {
-                    null
-                }
-            }
-            .filterNotNull()
-            .distinctBy { it.combinationKey }  // Deduplicate by sorted marker names
-    }
 }
 

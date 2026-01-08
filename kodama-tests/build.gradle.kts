@@ -8,6 +8,7 @@ kotlin {
     jvmToolchain(17)
     compilerOptions {
         // Context parameters require Kotlin 2.2+
+        // Not available in Kotlin 2.0.21
         // freeCompilerArgs.add("-Xcontext-parameters")
     }
 }

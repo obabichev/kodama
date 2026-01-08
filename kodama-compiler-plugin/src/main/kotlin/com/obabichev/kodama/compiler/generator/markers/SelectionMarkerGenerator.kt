@@ -4,7 +4,7 @@ import com.obabichev.kodama.compiler.data.MarkerInfo
 import com.obabichev.kodama.compiler.generator.CodeGenerator
 
 /**
- * Generates a selection marker interface with companion object.
+ * Generates a selection marker object.
  *
  * Selection markers enable type-safe named selections in queries:
  * ```
@@ -14,15 +14,13 @@ import com.obabichev.kodama.compiler.generator.CodeGenerator
  * Example output:
  * ```
  * /**
- *  * Marker interface for marker-based selections
- *  * Use companion object as parameter: .selectAs(TotalRevenue) { expr }
+ *  * Marker object for marker-based selections
+ *  * Use as parameter: .selectAs(TotalRevenue) { expr }
  *  */
- * interface TotalRevenue<out T> {
- *     companion object : TotalRevenue<Number>
- * }
+ * object TotalRevenue
  * ```
  *
- * The companion object allows the marker to be used directly as a parameter.
+ * The marker object is used as a compile-time type witness for selection tracking.
  */
 class SelectionMarkerGenerator(
     private val markerInfo: MarkerInfo
@@ -30,12 +28,10 @@ class SelectionMarkerGenerator(
 
     override fun generate(): String = buildString {
         appendLine("/**")
-        appendLine(" * Marker interface for marker-based selections")
-        appendLine(" * Use companion object as parameter: .selectAs(${markerInfo.interfaceName}) { expr }")
+        appendLine(" * Marker object for marker-based selections")
+        appendLine(" * Use as parameter: .selectAs(${markerInfo.interfaceName}) { expr }")
         appendLine(" */")
-        appendLine("interface ${markerInfo.interfaceName}<out T> {")
-        appendLine("    companion object : ${markerInfo.interfaceName}<${markerInfo.resultType}>")
-        appendLine("}")
+        appendLine("object ${markerInfo.interfaceName}")
     }
 
     override fun requiredImports(): Set<String> {

@@ -133,3 +133,48 @@ inline fun <reified T : Any> AggregateFunction<*>.aliasAs(): AliasedExpression<T
 
     return AliasedExpression(this, markerClass, sqlAlias)
 }
+
+// ============================================================================
+// Aggregate Function DSL Helpers
+// ============================================================================
+
+/**
+ * Create a SUM aggregate function from a TypedColumn.
+ * Usage: sum(order.cost)
+ */
+fun <T : Number, TableMarker, ColumnMarker> sum(typedColumn: com.obabichev.kodama.components.TypedColumn<T, TableMarker, ColumnMarker>): Sum<T> =
+    Sum(typedColumn.column)
+
+/**
+ * Create a COUNT aggregate function from a TypedColumn.
+ * Usage: count(order.id)
+ */
+fun <TableMarker, ColumnMarker> count(typedColumn: com.obabichev.kodama.components.TypedColumn<*, TableMarker, ColumnMarker>): Count =
+    Count(typedColumn.column)
+
+/**
+ * Create a COUNT(*) aggregate function.
+ * Usage: countAll()
+ */
+fun countAll(): Count = Count(null)
+
+/**
+ * Create an AVG aggregate function from a TypedColumn.
+ * Usage: avg(order.cost)
+ */
+fun <T : Number, TableMarker, ColumnMarker> avg(typedColumn: com.obabichev.kodama.components.TypedColumn<T, TableMarker, ColumnMarker>): Avg<T> =
+    Avg(typedColumn.column)
+
+/**
+ * Create a MIN aggregate function from a TypedColumn.
+ * Usage: min(order.cost)
+ */
+fun <T : Comparable<T>, TableMarker, ColumnMarker> min(typedColumn: com.obabichev.kodama.components.TypedColumn<T, TableMarker, ColumnMarker>): Min<T> =
+    Min(typedColumn.column)
+
+/**
+ * Create a MAX aggregate function from a TypedColumn.
+ * Usage: max(order.cost)
+ */
+fun <T : Comparable<T>, TableMarker, ColumnMarker> max(typedColumn: com.obabichev.kodama.components.TypedColumn<T, TableMarker, ColumnMarker>): Max<T> =
+    Max(typedColumn.column)

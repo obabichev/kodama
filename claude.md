@@ -554,12 +554,14 @@ Generated code is now placed in `{schemaPackage}.generated` instead of hardcoded
   - QueryLimitOffsetTests (10 tests)
   - JoinTypesTests (7 tests) ✅ Tests all 4 join types
   - SubqueryTests (10 tests) ✅ Tests subqueries with all join types
+  - PhantomTypesDemo (1 test) ✅ Tests compile-time selectAll safety
   - Entity Layer tests
 - **Completed Features**:
   - ✅ SELECT with type-safe column selection
-  - ✅ All SQL join types: INNER, LEFT, RIGHT, FULL (for both tables and subqueries) ✅ COMPLETE
-  - ✅ Join-type-aware nullability - INNER returns non-nullable, outer joins return appropriate nullability
-  - ✅ Subqueries in FROM and JOIN clauses with all join types ✅ NEW
+  - ✅ **Compile-time selectAll() validation** ✅ NEW - Invalid table selections caught by compiler
+  - ✅ All SQL join types: INNER, LEFT, RIGHT, FULL (for both tables and subqueries)
+  - ✅ Conservative nullable types for multi-table queries (safe for all join types)
+  - ✅ Subqueries in FROM and JOIN clauses with all join types
   - ✅ WHERE with eq operator
   - ✅ ORDER BY with asc/desc
   - ✅ LIMIT and OFFSET for pagination
@@ -570,6 +572,10 @@ Generated code is now placed in `{schemaPackage}.generated` instead of hardcoded
   - ✅ Date/Time column types (DATE, TIME, TIMESTAMP, TIMESTAMPTZ, TIMETZ, INTERVAL)
   - ✅ Entity Layer with interface-based entities
   - ✅ One-to-many and many-to-one relationships
-- **Documentation updated**: README, CHANGELOG, CLAUDE.md with outer join and subquery examples
-- **Code Quality**: Removed 13 redundant casts/mapNotNull calls - generated accessors have correct types
-- **Ready for next features**: AND/OR combinations, comparison operators, HAVING (see ROADMAP.md Phase 5)
+  - ✅ Modular code generation architecture (80+ generators)
+- **Known Limitations**:
+  - Multi-table query result accessors use nullable types for all tables (conservative but safe)
+  - This handles all join types correctly (INNER/LEFT/RIGHT/FULL)
+  - Future improvement: Encode join type in phantom types for precise nullability
+- **Documentation updated**: README, ROADMAP, CHANGELOG, CLAUDE.md
+- **Ready for next features**: UPDATE/DELETE statements, HAVING clause, AND/OR combinations (see ROADMAP.md)
