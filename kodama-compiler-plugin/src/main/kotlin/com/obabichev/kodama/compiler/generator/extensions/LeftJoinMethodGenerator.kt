@@ -40,13 +40,20 @@ class LeftJoinMethodGenerator(
     override fun generate(): String = buildString {
         // Build type parameters for source builder (without joining table)
         val sourceSelParams = fromCombination.tables.joinToString(", ") { "${it.capitalizedName}Sel" }
-        val sourceAllParams = "$sourceSelParams, AC : AggCount"
+        val sourceAllParams = "$sourceSelParams, AC : AggCount, SourceJP : JoinPattern"
 
         // Build type parameters for target builder (with joining table)
         val targetSelParams = toCombination.tables.joinToString(", ") {
             if (it.name == joiningTable.name) "NoColumnsSelected"
             else "${it.capitalizedName}Sel"
         }
+        // LEFT JOIN: Compute target JP by appending LEFT to source pattern
+        val targetPattern = if (fromCombination.joinedTables.isEmpty()) {
+            "LEFT"
+        } else {
+            fromCombination.joinPattern + "_LEFT"
+        }
+        val targetJP = "JoinPattern_$targetPattern"
         val targetAllParams = "$targetSelParams, AC"
 
         val contextClassName = "JoinContext_" + toCombination.tables.joinToString("_") { it.capitalizedName }
@@ -55,7 +62,7 @@ class LeftJoinMethodGenerator(
         appendLine(" * LEFT OUTER JOIN ${joiningTable.capitalizedName} table.")
         appendLine(" */")
         appendLine("fun <$sourceAllParams>")
-        appendLine("${fromCombination.builderClassName}<$sourceSelParams, AC>.leftJoin(")
+        appendLine("${fromCombination.builderClassName}<$sourceSelParams, AC, SourceJP>.leftJoin(")
 
         // Different parameter type for subqueries vs regular tables
         if (joiningTable.isSubquery) {
@@ -65,7 +72,7 @@ class LeftJoinMethodGenerator(
         }
 
         appendLine("    condition: $contextClassName.() -> Expression")
-        appendLine("): ${toCombination.builderClassName}<$targetAllParams> {")
+        appendLine("): ${toCombination.builderClassName}<$targetAllParams, $targetJP> {")
         appendLine("    val join = Join(")
         appendLine("        type = JoinType.LEFT,")
         appendLine("        relation = state.relations.relation(table),")

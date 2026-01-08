@@ -126,21 +126,67 @@ class DataTransformer(
      */
     @Suppress("UNCHECKED_CAST")
     private fun transformQueryCombinations(tables: List<TableInfo>): List<QueryCombinationInfo> {
-        val combinations = discoveredData["queryCombinations"] as? List<List<String>> ?: emptyList()
+        val combinationJoinTypesData = discoveredData["combinationJoinTypes"] as? Map<String, List<Map<String, Any?>>> ?: emptyMap()
         val tableMap = tables.associateBy { it.name }
 
-        val queryCombinations = combinations.map { tableNames ->
-            val combinationTables = tableNames.mapNotNull { tableMap[it] }
-            QueryCombinationInfo(
-                tables = combinationTables
-            )
+        // Transform each entry in combinationJoinTypesData into a QueryCombinationInfo
+        // Key format: "Person_Order:INNER" or just "Person" for single tables
+        val queryCombinations = combinationJoinTypesData.mapNotNull { (combinationKey, joinTypesForCombination) ->
+            // Extract table names from key (before the colon, if present)
+            val tableNames = combinationKey.split(":")[0].split("_")
+
+            if (tableNames.isEmpty()) {
+                return@mapNotNull null  // Skip empty combinations
+            }
+
+            if (tableNames.size == 1) {
+                // Single table query - just a base table, no joins
+                val baseTableInfo = tableMap[tableNames[0]] ?: return@mapNotNull null
+                QueryCombinationInfo(
+                    baseTable = baseTableInfo,
+                    joinedTables = emptyList()
+                )
+            } else {
+                // Multi-table query - first table is base, rest are joins
+                val baseTableInfo = tableMap[tableNames[0]] ?: return@mapNotNull null
+                val joinedTableInfos = tableNames.drop(1).mapIndexedNotNull { index, tableName ->
+                    val table = tableMap[tableName] ?: return@mapIndexedNotNull null
+
+                    // Get join type from discovered data (index + 1 because base table is at index 0)
+                    val joinTypeStr = joinTypesForCombination.getOrNull(index + 1)?.get("joinType") as? String
+                    val joinType = when (joinTypeStr) {
+                        "INNER" -> JoinType.INNER
+                        "LEFT" -> JoinType.LEFT
+                        "RIGHT" -> JoinType.RIGHT
+                        "FULL" -> JoinType.FULL
+                        else -> JoinType.INNER  // Default to INNER if not specified
+                    }
+
+                    JoinedTableInfo(
+                        table = table,
+                        joinType = joinType
+                    )
+                }
+
+                QueryCombinationInfo(
+                    baseTable = baseTableInfo,
+                    joinedTables = joinedTableInfos
+                )
+            }
         }.toMutableList()
+
+        // Capture regular combinations BEFORE adding any subquery combinations
+        val regularCombinations = queryCombinations.toList()
 
         // Add single-table combinations for all subqueries
         // These are needed for fromAliased(SubqueryMarker) { ... } patterns
         val subqueryTables = tables.filter { it.isSubquery }
         subqueryTables.forEach { subqueryTable ->
-            val singleTableCombination = QueryCombinationInfo(tables = listOf(subqueryTable))
+            val singleTableCombination = QueryCombinationInfo(
+                baseTable = subqueryTable,
+                joinedTables = emptyList(),
+                isSynthetic = true  // Mark as synthetic
+            )
             val exists = queryCombinations.any {
                 it.tables.size == 1 && it.tables[0].name == subqueryTable.name
             }
@@ -149,17 +195,37 @@ class DataTransformer(
             }
         }
 
-        // Note: Table+Subquery combinations are now only generated if explicitly discovered
-        // in the code via .joinAliased(Subquery) or .leftJoinAliased(Subquery) patterns.
-        // We no longer auto-generate all possible Table×Subquery combinations (Cartesian product)
-        // to avoid bloating the generated code with unused combinations.
-        //
-        // Previously, this code would generate 15 tables × 6 subqueries = 90 unused combinations.
-        // Now we only generate what's actually used in the codebase.
+        // Generate ONLY the single-table + subquery combinations for inline joinAliased support
+        // Multi-table + subquery combinations are rarely used and cause code explosion
+        // Users can chain multiple joinAliased calls if needed: from(T1).joinAliased(SQ1).joinAliased(SQ2)
+
+        subqueryTables.forEach { subqueryTable ->
+            regularCombinations.filter { it.tables.size == 1 }.forEach { baseCombination ->
+                // Generate single-table + subquery for ALL join types (INNER, LEFT, RIGHT, FULL)
+                // This enables .joinAliased(), .leftJoinAliased(), .rightJoinAliased(), .fullJoinAliased()
+                listOf(JoinType.INNER, JoinType.LEFT, JoinType.RIGHT, JoinType.FULL).forEach { joinType ->
+                    val combination = QueryCombinationInfo(
+                        baseTable = baseCombination.baseTable,
+                        joinedTables = listOf(JoinedTableInfo(subqueryTable, joinType)),
+                        isSynthetic = true  // Mark as synthetic
+                    )
+                    val exists = queryCombinations.any {
+                        it.tables.map { t -> t.name } == combination.tables.map { t -> t.name } &&
+                        it.joinPattern == combination.joinPattern
+                    }
+                    if (!exists) {
+                        queryCombinations.add(combination)
+                    }
+                }
+            }
+        }
 
         return queryCombinations.distinctBy { combination ->
-            // Deduplicate by table names in the combination
-            combination.tables.map { it.name }.joinToString("_")
+            // Deduplicate by BOTH table names AND join pattern
+            // This ensures Person INNER Order and Person LEFT Order are separate combinations
+            val tableNames = combination.tables.map { it.name }.joinToString("_")
+            val joinPattern = combination.joinPattern
+            "$tableNames:$joinPattern"
         }
     }
 

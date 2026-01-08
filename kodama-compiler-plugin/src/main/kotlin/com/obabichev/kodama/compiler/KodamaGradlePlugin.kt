@@ -90,7 +90,6 @@ class KodamaGradlePlugin : Plugin<Project> {
             val generatedDir = File(buildDir, "generated/kodama")
             val kspMetadataFile = File(buildDir, "generated/ksp/main/resources/kodama-ksp-metadata.json")
             val tableMetadataFile = File(generatedDir, "TableMetadata.kt")
-            val queryExtensionsFile = File(generatedDir, "QueryExtensions.kt")
 
             generateTableMetadataTask.configure {
                 it.schemaPackage.set(detectedSchemaPackage)
@@ -109,7 +108,7 @@ class KodamaGradlePlugin : Plugin<Project> {
                 it.testFiles.setFrom(project.fileTree(testDir).matching { pattern ->
                     pattern.include("**/*.kt")
                 })
-                it.outputFile.set(queryExtensionsFile)
+                it.outputDirectory.set(generatedDir)  // Now outputs to directory, not single file
             }
         }
 

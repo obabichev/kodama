@@ -88,6 +88,7 @@ class Query(
                     com.obabichev.kodama.components.JoinType.INNER -> "INNER JOIN"
                     com.obabichev.kodama.components.JoinType.LEFT -> "LEFT JOIN"
                     com.obabichev.kodama.components.JoinType.RIGHT -> "RIGHT JOIN"
+                    com.obabichev.kodama.components.JoinType.FULL -> "FULL OUTER JOIN"
                 }
 
                 // Generate join target - check if it's a subquery

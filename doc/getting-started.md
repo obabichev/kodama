@@ -651,6 +651,229 @@ from(User)
 - Optional parameters (nullable)
 - Type-safe method chaining
 
+## Joins
+
+Kodama provides full support for all SQL join types with compile-time type safety. Join multiple tables together and access columns from all joined tables in a type-safe manner.
+
+### Join Types
+
+Kodama supports all standard SQL join types:
+
+- **`join()` / `innerJoin()`** - Returns only rows where there's a match in both tables
+- **`leftJoin()`** - Returns all rows from the left table, with matching rows from the right (or NULL)
+- **`rightJoin()`** - Returns all rows from the right table, with matching rows from the left (or NULL)
+- **`fullJoin()`** - Returns all rows from both tables, with NULLs where there's no match
+
+**Note:** `join()` and `innerJoin()` are equivalent - use whichever you prefer.
+
+### Basic Join Example
+
+Join two tables and select columns from both:
+
+```kotlin
+// INNER JOIN: Get all persons with their orders
+val results = from(Person)
+    .join(Order) { order.userName eq person.name }
+    .selectAll(Person)
+    .selectAll(Order)
+    .execute(transaction)
+
+// Access columns from both tables
+results.forEach { row ->
+    val personName = row.person.name as String
+    val orderProduct = row.order.product as String
+    println("$personName ordered $orderProduct")
+}
+```
+
+**SQL Generated:**
+```sql
+SELECT "person".*, "order".*
+FROM "person"
+INNER JOIN "order" ON "order"."user_name" = "person"."name"
+```
+
+### Multiple Joins
+
+Chain multiple joins to query across several tables:
+
+```kotlin
+from(Person)
+    .join(Order) { order.userName eq person.name }
+    .join(Profile) { profile.userName eq person.name }
+    .selectAll(Person)
+    .selectAll(Order)
+    .selectAll(Profile)
+    .execute(transaction)
+    .forEach { row ->
+        val name = row.person.name as String
+        val product = row.order.product as String
+        val contact = row.profile.contact as String
+        println("$name ($contact) ordered $product")
+    }
+```
+
+### LEFT JOIN Example
+
+LEFT JOIN includes all rows from the left table, even if there's no match:
+
+```kotlin
+// Get all persons, including those without orders
+val results = from(Person)
+    .leftJoin(Order) { order.userName eq person.name }
+    .selectAll(Person)
+    .selectAll(Order)
+    .execute(transaction)
+
+results.forEach { row ->
+    val name = row.person.name as String
+    val product = row.order.product as? String  // May be null
+
+    if (product != null) {
+        println("$name ordered $product")
+    } else {
+        println("$name has no orders")
+    }
+}
+```
+
+**Key Points:**
+- All persons are included in the results
+- Order columns will be NULL for persons without orders
+- Use nullable access (`as?`) when accessing columns from the right table
+
+### RIGHT JOIN Example
+
+RIGHT JOIN includes all rows from the right table:
+
+```kotlin
+// Get all orders, including orphaned orders (no matching person)
+from(Person)
+    .rightJoin(Order) { order.userName eq person.name }
+    .selectAll(Person)
+    .selectAll(Order)
+    .execute(transaction)
+    .forEach { row ->
+        val personName = row.person.name as? String  // May be null
+        val product = row.order.product as String
+
+        if (personName != null) {
+            println("$personName ordered $product")
+        } else {
+            println("Orphaned order: $product")
+        }
+    }
+```
+
+### FULL OUTER JOIN Example
+
+FULL JOIN returns all rows from both tables, with NULLs where there's no match:
+
+```kotlin
+// Get all persons and all orders, showing mismatches
+from(Person)
+    .fullJoin(Order) { order.userName eq person.name }
+    .selectAll(Person)
+    .selectAll(Order)
+    .execute(transaction)
+    .forEach { row ->
+        val personName = row.person.name as? String
+        val product = row.order.product as? String
+
+        when {
+            personName != null && product != null ->
+                println("$personName ordered $product")
+            personName != null && product == null ->
+                println("$personName has no orders")
+            personName == null && product != null ->
+                println("Orphaned order: $product")
+        }
+    }
+```
+
+### Joins with WHERE Clause
+
+Combine joins with filtering:
+
+```kotlin
+// Get persons and their expensive orders
+from(Person)
+    .join(Order) { order.userName eq person.name }
+    .selectAll(Person)
+    .selectAll(Order)
+    .where { order.cost gte 1000 }  // Only orders >= $1000
+    .execute(transaction)
+```
+
+### Joins with ORDER BY
+
+Sort joined results:
+
+```kotlin
+// Get persons and orders, sorted by order cost
+from(Person)
+    .join(Order) { order.userName eq person.name }
+    .selectAll(Person)
+    .selectAll(Order)
+    .orderBy {
+        order.cost.desc()  // Most expensive first
+        person.name.asc()  // Then alphabetically
+    }
+    .execute(transaction)
+```
+
+### Join Condition Syntax
+
+The join condition lambda provides type-safe access to columns from all tables:
+
+```kotlin
+from(Person)
+    .join(Order) {
+        // Inside this block, you have access to:
+        // - person.* (columns from Person table)
+        // - order.* (columns from Order table being joined)
+
+        order.userName eq person.name  // Join condition
+    }
+```
+
+**Complex Join Conditions:**
+
+```kotlin
+// Multiple conditions (using 'and')
+from(Person)
+    .join(Order) {
+        (order.userName eq person.name) and (order.cost gte 100)
+    }
+```
+
+### Type Safety
+
+Kodama ensures compile-time safety for joins:
+
+```kotlin
+// ✅ Correct: Access person and order after selecting both
+from(Person)
+    .join(Order) { order.userName eq person.name }
+    .selectAll(Person)
+    .selectAll(Order)
+    .execute(transaction)
+    .forEach { row ->
+        row.person.name  // ✅ Available
+        row.order.product  // ✅ Available
+    }
+
+// ✅ Correct: Only access person if only Person was selected
+from(Person)
+    .join(Order) { order.userName eq person.name }
+    .selectAll(Person)  // Only selecting Person!
+    .execute(transaction)
+    .forEach { row ->
+        row.person.name  // ✅ Available
+        // row.order.product  // ❌ Compilation error - Order not selected!
+    }
+```
+
 ### Comparison Operators
 
 Kodama provides a complete set of comparison operators for building WHERE clauses:

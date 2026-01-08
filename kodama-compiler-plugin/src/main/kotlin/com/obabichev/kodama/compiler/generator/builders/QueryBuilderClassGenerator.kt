@@ -14,7 +14,7 @@ import com.obabichev.kodama.compiler.generator.CodeGenerator
  *
  * Example output for Person + Order combination:
  * ```
- * class AfterFromQueryBuilder_Person_Order<PersonSel, OrderSel, AC : AggCount>(
+ * class AfterFromQueryBuilder_Person_Order<PersonSel, OrderSel, AC : AggCount, JP : JoinPattern>(
  *     internal val state: com.obabichev.kodama.query.QueryState
  * ) {
  *     // Methods like select, where, join, etc. will be added by other generators
@@ -25,11 +25,12 @@ import com.obabichev.kodama.compiler.generator.CodeGenerator
  * - `PersonSel`: Tracks which Person columns are selected (NoColumnsSelected, AllColumnsSelected, etc.)
  * - `OrderSel`: Tracks which Order columns are selected
  * - `AC : AggCount`: Tracks how many aggregates are selected (NoAggregates, Has1Aggregate, etc.)
+ * - `JP : JoinPattern`: Tracks the join pattern (JoinPattern_INNER, JoinPattern_LEFT, etc.)
  *
  * This enables compile-time verification:
  * ```
- * val builder: AfterFromQueryBuilder_Person_Order<AllColumnsSelected, NoColumnsSelected, NoAggregates>
- * // Compiler knows: Person columns selected, Order not selected, no aggregates
+ * val builder: AfterFromQueryBuilder_Person_Order<AllColumnsSelected, NoColumnsSelected, NoAggregates, JoinPattern_INNER>
+ * // Compiler knows: Person columns selected, Order not selected, no aggregates, INNER join
  * ```
  */
 class QueryBuilderClassGenerator(
@@ -38,10 +39,10 @@ class QueryBuilderClassGenerator(
 
     override fun generate(): String = buildString {
         // Build generic type parameters for selection state
-        val selectionTypeParams = combination.tables.joinToString(", ") { 
-            "${it.capitalizedName}Sel" 
+        val selectionTypeParams = combination.tables.joinToString(", ") {
+            "${it.capitalizedName}Sel"
         }
-        val allTypeParams = "$selectionTypeParams, AC : AggCount"
+        val allTypeParams = "$selectionTypeParams, AC : AggCount, JP : JoinPattern"
 
         appendLine("class ${combination.builderClassName}<$allTypeParams>(")
         appendLine("    val state: com.obabichev.kodama.query.QueryState")

@@ -218,9 +218,10 @@ class PascalCaseNamingTests : DatabaseTest() {
             val accessor = row.tradingStrategy
             assertNotNull(accessor)
 
-            // The class should be named TradingStrategyResultAccessor_All (not tradingstrategyResultAccessor_All)
+            // The class should be named TradingStrategyResultAccessor_All_NonNull (not tradingstrategyResultAccessor_All_NonNull)
+            // Note: Single-table queries (no joins) use _NonNull variant for non-nullable accessors
             val className = accessor::class.simpleName
-            assertEquals("TradingStrategyResultAccessor_All", className)
+            assertEquals("TradingStrategyResultAccessor_All_NonNull", className)
         }
     }
 }

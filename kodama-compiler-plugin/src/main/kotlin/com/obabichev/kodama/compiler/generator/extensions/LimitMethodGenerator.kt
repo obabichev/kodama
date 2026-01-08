@@ -47,15 +47,15 @@ class LimitMethodGenerator(
     override fun generate(): String = buildString {
         // Build type parameters
         val selectionParams = combination.tables.joinToString(", ") { "${it.capitalizedName}Sel" }
-        val allParams = "$selectionParams, AC : AggCount"
+        val allParams = "$selectionParams, AC : AggCount, JP : JoinPattern"
 
         appendLine("/**")
         appendLine(" * Limit the number of results returned.")
         appendLine(" */")
         appendLine("fun <$allParams>")
-        appendLine("${combination.builderClassName}<$selectionParams, AC>.limit(")
+        appendLine("${combination.builderClassName}<$selectionParams, AC, JP>.limit(")
         appendLine("    count: Int")
-        appendLine("): ${combination.builderClassName}<$selectionParams, AC> {")
+        appendLine("): ${combination.builderClassName}<$selectionParams, AC, JP> {")
         appendLine("    state._limit = count")
         appendLine("    return ${combination.builderClassName}(state)")
         appendLine("}")
@@ -63,7 +63,8 @@ class LimitMethodGenerator(
 
     override fun requiredImports(): Set<String> {
         return setOf(
-            "com.obabichev.kodama.query.AggCount"
+            "com.obabichev.kodama.query.AggCount",
+            "com.obabichev.kodama.query.JoinPattern"
         )
     }
 }

@@ -39,9 +39,9 @@ class QueryBuilderBuildMethodGenerator(
         val selectionTypeParams = combination.tables.joinToString(", ") {
             "${it.capitalizedName}Sel"
         }
-        val allTypeParams = "$selectionTypeParams, AC : AggCount"
+        val allTypeParams = "$selectionTypeParams, AC : AggCount, JP : JoinPattern"
 
-        appendLine("fun <$allTypeParams> ${combination.builderClassName}<$selectionTypeParams, AC>.build(): Query {")
+        appendLine("fun <$allTypeParams> ${combination.builderClassName}<$selectionTypeParams, AC, JP>.build(): Query {")
         appendLine("    if (state._selectedColumns.isEmpty() && state._aggregateSelections.isEmpty() && state._selectables.isEmpty()) {")
         appendLine("        error(\"No columns selected. Use .selectAs() or .selectAll() to specify columns to retrieve.\")")
         appendLine("    }")

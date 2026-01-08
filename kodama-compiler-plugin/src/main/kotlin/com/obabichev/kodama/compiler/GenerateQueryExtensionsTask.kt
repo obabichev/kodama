@@ -5,6 +5,7 @@ import com.obabichev.kodama.compiler.metadata.RuntimeMetadataExtractor
 import com.obabichev.kodama.compiler.metadata.TableMetadata
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.ConfigurableFileCollection
+import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.*
@@ -55,7 +56,12 @@ internal data class SelectionMarkerInfo(
  * - Execute methods for discovered selection patterns
  * - Subquery support
  *
- * Output: QueryExtensions.kt (~8,000-10,000 lines)
+ * Output: Multiple organized files (~100-150 files total)
+ * - _infrastructure/ - Shared markers, phantom types, registries
+ * - single_table/ - One file per regular table
+ * - combinations/ - One file per multi-table combination
+ * - subqueries/ - One file per subquery
+ * - synthetic/ - Auto-generated Table+Subquery combinations
  */
 @CacheableTask
 abstract class GenerateQueryExtensionsTask : DefaultTask() {
@@ -66,8 +72,8 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
     @get:Input
     abstract val generatedPackage: Property<String>
 
-    @get:OutputFile
-    abstract val outputFile: RegularFileProperty
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
 
     @get:InputFile
     @get:PathSensitive(PathSensitivity.RELATIVE)
@@ -140,7 +146,7 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
 
         // Convert package name to file path (com.example.package -> com/example/package)
         val genPkgPath = genPkg.replace('.', '/')
-        val queryOutputFile = outputFile.get().asFile
+        val outputDir = outputDirectory.asFile.get()
 
         // Discover tables using KSP + Runtime metadata extraction
         val tables = mutableSetOf<String>()
@@ -746,12 +752,21 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
         }
 
         // Discover query combinations from test files
-        val queryCombinations = mutableSetOf<List<String>>()
+        // Use List instead of Set to allow duplicates with different join patterns
+        // Deduplication will happen later in DataTransformer using both tables AND join pattern
+        val queryCombinations = mutableListOf<List<String>>()
+
+        // NEW: Track join types for each table in each combination
+        // Maps combination key (e.g., "Person_Order") to list of (tableName, joinType)
+        // First table has null join type (it's the base table from `from(...)`)
+        // Example: "Person_Order" -> [("Person", null), ("Order", "INNER")]
+        val combinationJoinTypes = mutableMapOf<String, List<Pair<String, String?>>>()
 
         // IMPORTANT: Add all single-table combinations first
         // This ensures Phase 2 generates builders for ALL tables (needed by Phase 1's from() functions)
         tables.forEach { tableName ->
             queryCombinations.add(listOf(tableName))  // Use original case to match pattern scanner
+            combinationJoinTypes[tableName] = listOf(tableName to null)  // Single table, no join
         }
 
         // NEW: Discover selection patterns (which columns are actually selected)
@@ -840,16 +855,30 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
             // Match query chains: from(Table).join(Table)...
             // Look for from(...) and then capture everything until .select or .where or end
             // Includes joinAliased and leftJoinAliased for subquery joins
-            val queryChainPattern = """from\s*\([^)]+\)(?:\s*\.(?:join|leftJoin|joinAliased|leftJoinAliased)\s*\([^)]+\)(?:\s*\{[^}]*\})?)*""".toRegex()
+            // Also includes rightJoin and fullJoin for complete join type coverage
+            val queryChainPattern = """from\s*\([^)]+\)(?:\s*\.(?:join|innerJoin|leftJoin|rightJoin|fullJoin|joinAliased|leftJoinAliased)\s*\([^)]+\)(?:\s*\{[^}]*\})?)*""".toRegex()
 
             queryChainPattern.findAll(content).forEach { chainMatch ->
                 val chain = chainMatch.value
                 val typesInChain = mutableListOf<String>()
+                val joinTypesInChain = mutableListOf<String?>()  // Track join type for each table
 
-                // Extract table names from the chain
-                val tableRefPattern = """(?:from|fromAliased|join|joinAliased|leftJoin|leftJoinAliased)\s*\(\s*(\w+)""".toRegex()
+                // Extract table names AND join types from the chain
+                // Capture: (join method)(table name)
+                val tableRefPattern = """(from|fromAliased|join|innerJoin|leftJoin|rightJoin|fullJoin|joinAliased|leftJoinAliased|rightJoinAliased|fullJoinAliased)\s*\(\s*(\w+)""".toRegex()
                 tableRefPattern.findAll(chain).forEach { typeMatch ->
-                    val tableRef = typeMatch.groupValues[1]
+                    val joinMethod = typeMatch.groupValues[1]
+                    val tableRef = typeMatch.groupValues[2]
+
+                    // Map join method to JoinType
+                    val joinType = when (joinMethod) {
+                        "from", "fromAliased" -> null  // Base table, no join type
+                        "join", "innerJoin", "joinAliased" -> "INNER"
+                        "leftJoin", "leftJoinAliased" -> "LEFT"
+                        "rightJoin", "rightJoinAliased" -> "RIGHT"
+                        "fullJoin", "fullJoinAliased" -> "FULL"
+                        else -> null
+                    }
 
                     when {
                         // Check if this is a subquery variable
@@ -857,11 +886,13 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
                             // It's a subquery variable - use the subquery name
                             val subqueryName = subqueryVarMap[tableRef]!!
                             typesInChain.add(subqueryName)
+                            joinTypesInChain.add(joinType)
                         }
                         // Check if this is a subquery marker interface (used directly in joinAliased/leftJoinAliased)
                         subqueries.containsKey(tableRef) -> {
                             // It's a subquery marker - use it directly
                             typesInChain.add(tableRef)
+                            joinTypesInChain.add(joinType)
                         }
                         // Otherwise, it's a regular table
                         else -> {
@@ -870,23 +901,35 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
                             // Only add if it's a capitalized table name (real table)
                             if (tableRef[0].isUpperCase()) {
                                 typesInChain.add(tableName)
+                                joinTypesInChain.add(joinType)
                             }
                         }
                     }
                 }
 
-                // Store all prefixes
+                // Store all prefixes with their join types
                 if (typesInChain.isNotEmpty()) {
                     for (i in 1..typesInChain.size) {
                         val subCombination = typesInChain.take(i)
                         queryCombinations.add(subCombination)
+
+                        // Store join types for this combination
+                        val joinTypesForCombination = typesInChain.take(i).zip(joinTypesInChain.take(i))
+
+                        // Include join pattern in key to distinguish different join types for same tables
+                        // Example: "Person_Order:INNER" vs "Person_Order:LEFT"
+                        val tableNames = subCombination.joinToString("_")
+                        val joinPattern = joinTypesInChain.take(i).drop(1).filterNotNull().joinToString("_")  // Skip first (base table has no join)
+                        val combinationKey = if (joinPattern.isEmpty()) tableNames else "$tableNames:$joinPattern"
+
+                        combinationJoinTypes[combinationKey] = joinTypesForCombination
                     }
                 }
             }
 
             // NEW: Scan for inline subqueries in join/from clauses
             // Matches: .joinAliased( from(...)...aliasAs<SubqueryName>() ) or .fromAliased( from(...)...aliasAs<SubqueryName>() )
-            val inlineSubqueryPattern = """\.(?:from|fromAliased|join|joinAliased|leftJoin|leftJoinAliased)\s*\(\s*from[\s\S]*?\.aliasAs<([A-Z]\w+)>\(\)\s*\)""".toRegex()
+            val inlineSubqueryPattern = """\.(?:from|fromAliased|join|joinAliased|leftJoin|leftJoinAliased|rightJoin|rightJoinAliased|fullJoin|fullJoinAliased)\s*\(\s*from[\s\S]*?\.aliasAs<([A-Z]\w+)>\(\)\s*\)""".toRegex()
             inlineSubqueryPattern.findAll(content).forEach { match ->
                 val subqueryName = match.groupValues[1]
                 val matchStart = match.range.first
@@ -1258,6 +1301,11 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
         // Build discovered data map
         val discoveredDataMap = mapOf<String, Any>(
             "queryCombinations" to queryCombinations.toList(),
+            "combinationJoinTypes" to combinationJoinTypes.mapValues { (_, joinTypes) ->
+                joinTypes.map { (tableName, joinType) ->
+                    mapOf("table" to tableName, "joinType" to joinType)
+                }
+            },
             "subqueries" to subqueries.values.map { subquery ->
                 mapOf(
                     "name" to subquery.name,
@@ -1310,21 +1358,25 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
 
         logger.lifecycle("Kodama Phase 2: Generated ${allGenerators.size} code generators")
 
-        // Generate output file
-        val markerPackages = transformedData.markers.map { it.packageName }.toSet()
-        val fileGenerator = com.obabichev.kodama.compiler.generator.FileGenerator(
+        // Generate multiple files using MultiFileGenerator
+        val multiFileGenerator = com.obabichev.kodama.compiler.generator.MultiFileGenerator(
+            outputDirectory = outputDir,
             packageName = genPkg,
-            fileName = "QueryExtensions.kt",
-            generators = allGenerators,
-            schemaPackage = schemaPkg,
-            markerPackages = markerPackages
+            generators = allGenerators
         )
 
-        // Write output
-        queryOutputFile.parentFile.mkdirs()
-        queryOutputFile.writeText(fileGenerator.generate())
+        // Write output files
+        outputDir.mkdirs()
+        val generatedFiles = multiFileGenerator.generate()
 
-        logger.lifecycle("Kodama Phase 2: Successfully generated QueryExtensions.kt")
-        logger.lifecycle("  Output: ${queryOutputFile.absolutePath}")
+        // Log statistics
+        val stats = multiFileGenerator.getStatistics()
+        logger.lifecycle("Kodama Phase 2: Successfully generated ${stats["totalFiles"]} files")
+        logger.lifecycle("  - Infrastructure: ${stats["infrastructureFiles"]} files")
+        logger.lifecycle("  - Single-table: ${stats["singleTableFiles"]} files")
+        logger.lifecycle("  - Combinations: ${stats["combinationFiles"]} files")
+        logger.lifecycle("  - Subqueries: ${stats["subqueryFiles"]} files")
+        logger.lifecycle("  - Synthetic: ${stats["syntheticFiles"]} files")
+        logger.lifecycle("  Output directory: ${outputDir.absolutePath}")
     }
 }

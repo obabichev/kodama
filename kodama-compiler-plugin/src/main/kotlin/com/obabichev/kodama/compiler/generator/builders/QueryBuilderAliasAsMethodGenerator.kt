@@ -36,17 +36,17 @@ class QueryBuilderAliasAsMethodGenerator(
 
     override fun generate(): String = buildString {
         // Build generic type parameters
-        val selectionTypeParams = combination.tables.joinToString(", ") { 
-            "${it.capitalizedName}Sel" 
+        val selectionTypeParams = combination.tables.joinToString(", ") {
+            "${it.capitalizedName}Sel"
         }
-        val allTypeParams = "reified T : Any, $selectionTypeParams, AC : AggCount"
+        val allTypeParams = "reified T : Any, $selectionTypeParams, AC : AggCount, JP : JoinPattern"
         val wildcards = selectionTypeParams.split(", ").joinToString(", ") { "*" }
 
         appendLine("/**")
         appendLine(" * Create a type-safe subquery with marker interface T.")
         appendLine(" * Returns T (marker interface) - SubqueryTable classes implement their markers!")
         appendLine(" */")
-        appendLine("inline fun <$allTypeParams> ${combination.builderClassName}<$wildcards, AC>.aliasAs(): T {")
+        appendLine("inline fun <$allTypeParams> ${combination.builderClassName}<$wildcards, AC, JP>.aliasAs(): T {")
         appendLine("    val markerClass = T::class")
         appendLine("    val query = this.build()")
         appendLine("    return SubqueryRegistry.createSubquery(markerClass, query) as T")

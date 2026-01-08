@@ -50,15 +50,15 @@ class OffsetMethodGenerator(
     override fun generate(): String = buildString {
         // Build type parameters
         val selectionParams = combination.tables.joinToString(", ") { "${it.capitalizedName}Sel" }
-        val allParams = "$selectionParams, AC : AggCount"
+        val allParams = "$selectionParams, AC : AggCount, JP : JoinPattern"
 
         appendLine("/**")
         appendLine(" * Skip a number of rows before returning results.")
         appendLine(" */")
         appendLine("fun <$allParams>")
-        appendLine("${combination.builderClassName}<$selectionParams, AC>.offset(")
+        appendLine("${combination.builderClassName}<$selectionParams, AC, JP>.offset(")
         appendLine("    count: Int")
-        appendLine("): ${combination.builderClassName}<$selectionParams, AC> {")
+        appendLine("): ${combination.builderClassName}<$selectionParams, AC, JP> {")
         appendLine("    state._offset = count")
         appendLine("    return ${combination.builderClassName}(state)")
         appendLine("}")
@@ -66,7 +66,8 @@ class OffsetMethodGenerator(
 
     override fun requiredImports(): Set<String> {
         return setOf(
-            "com.obabichev.kodama.query.AggCount"
+            "com.obabichev.kodama.query.AggCount",
+            "com.obabichev.kodama.query.JoinPattern"
         )
     }
 }

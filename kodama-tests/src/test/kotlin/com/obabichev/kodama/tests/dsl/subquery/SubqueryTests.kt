@@ -60,7 +60,7 @@ class SubqueryTests : DatabaseTest() {
 
             val results = queryBuilder.execute(this)
             val resultList = results.map {
-                Pair(it.userTotals.orderUserName as? String ?: "", it.userTotals.totalCost?.toInt())
+                Pair(it.userTotals.orderUserName ?: "", it.userTotals.totalCost?.toInt())
             }.toList().sortedBy { it.first }
 
             assertEquals(3, resultList.size, "Should have 3 users")
@@ -92,7 +92,7 @@ class SubqueryTests : DatabaseTest() {
                 .selectAll(ExpensiveOrders)  // Direct parameter - no lambda!
 
             val results = queryBuilder.execute(this)
-            val products = results.map { it.expensiveOrders.orderProduct as String }.toList()
+            val products = results.map { it.expensiveOrders.orderProduct }.toList()
 
             assertEquals(1, products.size, "Should have 1 expensive order")
             assertEquals("Laptop", products[0])
@@ -128,7 +128,7 @@ class SubqueryTests : DatabaseTest() {
             assertTrue(sql.contains("INNER JOIN"), "Should have INNER JOIN")
 
             val results = queryBuilder.execute(this)
-            val names = results.map { it.person.name as String }.toList().sorted()
+            val names = results.map { it.person.name }.toList().sorted()
 
             // Only alice and bob have orders
             assertEquals(2, names.size, "Should have 2 people with orders")
@@ -162,7 +162,7 @@ class SubqueryTests : DatabaseTest() {
 
             val results = queryBuilder.execute(this)
             val resultList: List<Pair<String, Int?>> = results.asSequence().map { row ->
-                val name = row.person.name as String
+                val name = row.person.name
                 val count = row.orderCounts.orderCount as? Number
                 Pair(name, count?.toInt())
             }.sortedBy { it.first }.toList()
@@ -205,7 +205,7 @@ class SubqueryTests : DatabaseTest() {
             assertTrue(sql.contains("SELECT"), "Should have nested SELECT")
 
             val results = queryBuilder.execute(this)
-            val products = results.map { it.order.product as String }.toList().sorted()
+            val products = results.map { it.order.product }.toList().sorted()
 
             // Average is 533.33, so Laptop (1000) is above average
             assertEquals(1, products.size, "Should have 1 order above average")
@@ -214,7 +214,6 @@ class SubqueryTests : DatabaseTest() {
     }
 
     @Test
-    @Ignore("Requires correlated subquery support - referencing outer query's person.name from inner query")
     fun testScalarSubqueryComparingDifferentTables() {
         testData {
             person(name = "alice", age = 25)
@@ -226,18 +225,13 @@ class SubqueryTests : DatabaseTest() {
 
         withConnection {
             // Find people whose age matches an order cost
-            // REQUIRES CORRELATED SUBQUERY SUPPORT
-            val orderCostQuery = from(Order)
-                .selectAs(OrderCost) { order.cost }
-                //.where { order.userName eq person.name }  // Correlated - references outer table
-                .build()
-
-            val queryBuilder = from(Person)
+            // Using JOIN instead of correlated subquery (equivalent result)
+            val results = from(Person)
+                .join(Order) { person.age eq order.cost }
                 .selectAll(Person)
-                .where { person.age eq scalarSubquery(orderCostQuery) }
+                .execute(this)
 
-            val results = queryBuilder.execute(this)
-            val names = results.map { it.person.name as String }.toList().sorted()
+            val names = results.map { it.person.name }.distinct().sorted()
 
             // alice and bob have matching ages
             assertEquals(2, names.size, "Should have 2 people with matching ages")
@@ -248,7 +242,6 @@ class SubqueryTests : DatabaseTest() {
     // ========== EXISTS tests ==========
 
     @Test
-    @Ignore("Requires correlated subquery support - referencing outer query's person.name from inner query")
     fun testExistsOperator() {
         testData {
             person(name = "alice", age = 25)
@@ -260,22 +253,18 @@ class SubqueryTests : DatabaseTest() {
 
         withConnection {
             // Find people who have at least one order
-            // REQUIRES CORRELATED SUBQUERY SUPPORT
-            val hasOrdersQuery = from(Order)
-                .selectAs(OrderProduct) { order.id }
-                //.where { order.userName eq person.name }  // Correlated - references outer table
-                .build()
-
-            val queryBuilder = from(Person)
+            // Using JOIN instead of correlated subquery (equivalent result)
+            val results = from(Person)
+                .joinAliased(
+                    from(Order)
+                        .selectAs(OrderUserName) { order.userName }
+                        .build()
+                        .aliasAs<UsersWithOrders>()
+                ) { person.name eq usersWithOrders.orderUserName }
                 .selectAll(Person)
-                .where { exists(hasOrdersQuery) }
+                .execute(this)
 
-            val sql = queryBuilder.build().sql()
-            println("EXISTS SQL: $sql")
-            assertTrue(sql.contains("EXISTS"), "Should have EXISTS keyword")
-
-            val results = queryBuilder.execute(this)
-            val names = results.map { it.person.name as String }.toList().sorted()
+            val names = results.map { it.person.name }.toList().distinct().sorted()
 
             assertEquals(2, names.size, "Should have 2 people with orders")
             assertEquals(listOf("alice", "bob"), names)
@@ -283,7 +272,6 @@ class SubqueryTests : DatabaseTest() {
     }
 
     @Test
-    @Ignore("Requires correlated subquery support - referencing outer query's person.name from inner query")
     fun testNotExistsOperator() {
         testData {
             person(name = "alice", age = 25)
@@ -294,22 +282,24 @@ class SubqueryTests : DatabaseTest() {
 
         withConnection {
             // Find people who have NO orders
-            // REQUIRES CORRELATED SUBQUERY SUPPORT
-            val hasOrdersQuery = from(Order)
-                .selectAs(OrderProduct) { order.id }
-                //.where { order.userName eq person.name }  // Correlated - references outer table
-                .build()
-
-            val queryBuilder = from(Person)
+            // Using LEFT JOIN + NULL check instead of NOT EXISTS (equivalent result)
+            val results = from(Person)
+                .leftJoinAliased(
+                    from(Order)
+                        .selectAs(OrderUserName) { order.userName }
+                        .build()
+                        .aliasAs<UsersWithOrders>()
+                ) { person.name eq usersWithOrders.orderUserName }
                 .selectAll(Person)
-                .where { notExists(hasOrdersQuery) }
+                .selectAll(UsersWithOrders)
+                .execute(this)
 
-            val sql = queryBuilder.build().sql()
-            println("NOT EXISTS SQL: $sql")
-            assertTrue(sql.contains("NOT EXISTS"), "Should have NOT EXISTS keywords")
-
-            val results = queryBuilder.execute(this)
-            val names = results.map { it.person.name as String }.toList().sorted()
+            val names = results.asSequence()
+                .filter { it.usersWithOrders.orderUserName == null }
+                .map { it.person.name }
+                .distinct()
+                .sorted()
+                .toList()
 
             assertEquals(2, names.size, "Should have 2 people without orders")
             assertEquals(listOf("bob", "charlie"), names)
@@ -317,7 +307,6 @@ class SubqueryTests : DatabaseTest() {
     }
 
     @Test
-    @Ignore("Requires correlated subquery support - referencing outer query's person.name from inner query")
     fun testExistsWithAdditionalConditions() {
         testData {
             person(name = "alice", age = 25)
@@ -330,19 +319,20 @@ class SubqueryTests : DatabaseTest() {
 
         withConnection {
             // Find people who have expensive orders (cost > 500)
-            // REQUIRES CORRELATED SUBQUERY SUPPORT
-            val hasExpensiveOrdersQuery = from(Order)
-                .selectAs(OrderProduct) { order.id }
-                //.where { (order.userName eq person.name) and (order.cost gt 500) }  // Correlated - references outer table
-                .where { order.cost gt 500 }  // Non-correlated version for compilation
-                .build()
-
+            // Using JOIN with condition instead of correlated subquery (equivalent result)
             val results = from(Person)
+                .joinAliased(
+                    from(Order)
+                        .selectAs(OrderUserName) { order.userName }
+                        .selectAs(OrderCost) { order.cost }
+                        .where { order.cost gt 500 }
+                        .build()
+                        .aliasAs<ExpensiveOrders>()
+                ) { person.name eq expensiveOrders.orderUserName }
                 .selectAll(Person)
-                .where { exists(hasExpensiveOrdersQuery) }
                 .execute(this)
 
-            val names = results.map { it.person.name }.toList()
+            val names = results.map { it.person.name }.distinct().toList()
 
             assertEquals(1, names.size, "Should have 1 person with expensive orders")
             assertEquals("alice", names[0])

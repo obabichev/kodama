@@ -9,11 +9,11 @@ import com.obabichev.kodama.query.NoSelections
 fun debugTypes() {
     // Step 1: from(Order)
     val step1 = from(Order)
-    val step1Type: AfterFromQueryBuilder_Order<NoColumnsSelected, NoSelections> = step1
+    val step1Type: AfterFromQueryBuilder_Order<NoColumnsSelected, NoSelections, JoinPattern_NONE> = step1
 
     // Step 2: selectAs with TotalRevenue marker
     val step2 = step1.selectAs(TotalRevenue) { sum(order.cost) }
-    val step2Type: AfterFromQueryBuilder_Order<NoColumnsSelected, SelectionSet_TotalRevenue> = step2
+    val step2Type: AfterFromQueryBuilder_Order<NoColumnsSelected, SelectionSet_TotalRevenue, JoinPattern_NONE> = step2
 
     // Step 3: execute - what do we get?
     val step3 = step2.execute(null!!)

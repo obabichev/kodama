@@ -65,17 +65,25 @@ class ExecuteMethodGenerator(
         val selectionParams = combination.tables.joinToString(", ") { "${it.capitalizedName}Sel" }
         val allParams = "$selectionParams, AC : AggCount"
 
-        val resultClassName = "QueryResult_" + combination.tables.joinToString("_") { it.capitalizedName }
+        // Include join pattern in result class name for pattern-specific classes
+        val resultClassName = if (combination.joinPattern.isEmpty()) {
+            "QueryResult_" + combination.tables.joinToString("_") { it.capitalizedName }
+        } else {
+            "QueryResult_" + combination.tables.joinToString("_") { it.capitalizedName } + "_" + combination.joinPattern
+        }
+
+        // JP type constraint to match the specific join pattern
+        val jpConstraint = combination.joinPatternTypeName
 
         // Generate unique JVM name to avoid signature clashes
-        val jvmName = "execute_${combination.builderClassName}_Generic"
+        val jvmName = "execute_${combination.builderClassName}_Generic_${combination.joinPattern.replace("_", "")}"
 
         appendLine("/**")
-        appendLine(" * Execute the query and return results.")
+        appendLine(" * Execute the query and return results (join pattern: ${combination.joinPattern.ifEmpty { "NONE" }}).")
         appendLine(" */")
         appendLine("@JvmName(\"$jvmName\")")
         appendLine("fun <$allParams>")
-        appendLine("${combination.builderClassName}<$selectionParams, AC>.execute(")
+        appendLine("${combination.builderClassName}<$selectionParams, AC, $jpConstraint>.execute(")
         appendLine("    transaction: com.obabichev.kodama.execute.JdbcTransaction")
         appendLine("): com.obabichev.kodama.query.QueryResultIterable<$resultClassName> {")
         appendLine("    val query = this.build()")

@@ -1,5 +1,6 @@
 package com.obabichev.kodama.compiler.generator.results
 
+import com.obabichev.kodama.compiler.data.JoinType
 import com.obabichev.kodama.compiler.data.QueryCombinationInfo
 import com.obabichev.kodama.compiler.generator.CodeGenerator
 
@@ -48,28 +49,89 @@ class QueryResultClassGenerator(
 ) : CodeGenerator {
 
     override fun generate(): String = buildString {
-        val className = "QueryResult_" + combination.tables.joinToString("_") { it.capitalizedName }
+        // Include join pattern in class name for pattern-specific result classes
+        val className = if (combination.joinPattern.isEmpty()) {
+            // Single table query
+            "QueryResult_" + combination.tables.joinToString("_") { it.capitalizedName }
+        } else {
+            // Multi-table query with joins - include pattern for uniqueness
+            "QueryResult_" + combination.tables.joinToString("_") { it.capitalizedName } + "_" + combination.joinPattern
+        }
 
         appendLine("/**")
         appendLine(" * Result class for ${combination.tables.joinToString(" + ") { it.capitalizedName }} query.")
+        if (combination.joinPattern.isNotEmpty()) {
+            appendLine(" * Join pattern: ${combination.joinPattern}")
+        }
         appendLine(" */")
         appendLine("data class $className(")
         appendLine("    override val resultSet: ResultSet,")
         appendLine("    override val relations: RelationsContainer,")
         appendLine("    override val selectedColumns: List<Column<*>>")
         appendLine(") : com.obabichev.kodama.query.QueryResult {")
-        combination.tables.forEach { table ->
-            appendLine("    val ${table.camelCaseName}: ${table.capitalizedName}ResultAccessor_All")
 
-            // Different constructor args for subqueries vs regular tables
-            if (table.isSubquery) {
-                // Subquery result accessors only take resultSet and relations
-                appendLine("        get() = ${table.capitalizedName}ResultAccessor_All(resultSet, relations)")
+        // JOIN-TYPE-AWARE NULLABILITY:
+        // We now generate separate result classes per join pattern, so we can use
+        // precise nullability based on the specific join types used.
+        //
+        // Nullability rules:
+        // - INNER JOIN: Both sides non-nullable (both must exist)
+        // - LEFT JOIN: Left side non-nullable, right side nullable
+        // - RIGHT JOIN: Left side nullable, right side non-nullable
+        // - FULL OUTER JOIN: Both sides nullable
+        //
+        // Base table nullability: Non-nullable UNLESS there's a RIGHT or FULL join
+        // (those can make the left side NULL)
+
+        // Determine if base table can be null (if any RIGHT or FULL join exists)
+        val baseTableCanBeNull = combination.joinedTables.any {
+            it.joinType == JoinType.RIGHT || it.joinType == JoinType.FULL
+        }
+
+        // Base table accessor
+        val baseTable = combination.baseTable
+        val baseAccessorVariant = if (baseTable.isSubquery) {
+            "${baseTable.capitalizedName}ResultAccessor_All"  // Subqueries don't have variants yet
+        } else {
+            if (baseTableCanBeNull) {
+                "${baseTable.capitalizedName}ResultAccessor_All_Nullable"  // RIGHT/FULL joins make base nullable
             } else {
-                // Regular table result accessors take resultSet, relations, and selectedColumns
-                appendLine("        get() = ${table.capitalizedName}ResultAccessor_All(resultSet, relations, selectedColumns)")
+                "${baseTable.capitalizedName}ResultAccessor_All_NonNull"  // INNER/LEFT joins keep base non-null
             }
         }
+
+        appendLine("    val ${baseTable.camelCaseName}: $baseAccessorVariant")
+        if (baseTable.isSubquery) {
+            appendLine("        get() = $baseAccessorVariant(resultSet, relations)")
+        } else {
+            appendLine("        get() = $baseAccessorVariant(resultSet, relations, selectedColumns)")
+        }
+
+        // Joined tables - nullability depends on specific join type
+        combination.joinedTables.forEach { joinedTable ->
+            val table = joinedTable.table
+            val joinType = joinedTable.joinType
+
+            val accessorVariant = if (table.isSubquery) {
+                "${table.capitalizedName}ResultAccessor_All"  // Subqueries don't have variants yet
+            } else {
+                // Determine nullability based on join type
+                when (joinType) {
+                    JoinType.INNER -> "${table.capitalizedName}ResultAccessor_All_NonNull"  // INNER: non-nullable
+                    JoinType.LEFT -> "${table.capitalizedName}ResultAccessor_All_Nullable"   // LEFT: right side nullable
+                    JoinType.RIGHT -> "${table.capitalizedName}ResultAccessor_All_NonNull"   // RIGHT: right side non-nullable
+                    JoinType.FULL -> "${table.capitalizedName}ResultAccessor_All_Nullable"   // FULL: both sides nullable
+                }
+            }
+
+            appendLine("    val ${table.camelCaseName}: $accessorVariant")
+            if (table.isSubquery) {
+                appendLine("        get() = $accessorVariant(resultSet, relations)")
+            } else {
+                appendLine("        get() = $accessorVariant(resultSet, relations, selectedColumns)")
+            }
+        }
+
         appendLine("}")
     }
 

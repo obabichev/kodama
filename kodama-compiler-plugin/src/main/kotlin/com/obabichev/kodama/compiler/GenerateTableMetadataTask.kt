@@ -200,18 +200,54 @@ abstract class GenerateTableMetadataTask : DefaultTask() {
         appendLine()
 
         tables.forEach { table ->
+            // Generate NON-NULLABLE accessor variant
+            // Used for INNER JOINs and base tables - respects column's intrinsic nullability
             appendLine("/**")
-            appendLine(" * Result accessor for all columns of ${table.name}")
+            appendLine(" * Result accessor for all columns of ${table.name} (Non-nullable variant)")
+            appendLine(" * Used for:")
+            appendLine(" * - Base table in `from(${table.name})`")
+            appendLine(" * - INNER JOIN tables")
+            appendLine(" * Properties return non-nullable types unless column is defined as nullable in schema.")
             appendLine(" */")
-            appendLine("class ${table.name}ResultAccessor_All(")
+            appendLine("class ${table.name}ResultAccessor_All_NonNull(")
             appendLine("    resultSet: ResultSet,")
             appendLine("    relations: RelationsContainer,")
             appendLine("    selectedColumns: List<Column<*>>")
             appendLine(") : TableResultAccessor(resultSet, relations, selectedColumns) {")
 
             table.columns.forEach { column ->
+                // Respect column's intrinsic nullability
+                // If column is defined as nullable in schema, keep it nullable
+                // Otherwise, return non-nullable type
                 appendLine("    val ${column.propertyName}: ${column.kotlinType}")
                 appendLine("        get() = readColumn($schemaPkg.${table.name}.${column.propertyName}) as ${column.kotlinType}")
+                appendLine()
+            }
+
+            appendLine("}")
+            appendLine()
+
+            // Generate NULLABLE accessor variant
+            // Used for OUTER JOINs where table can be missing
+            appendLine("/**")
+            appendLine(" * Result accessor for all columns of ${table.name} (Nullable variant)")
+            appendLine(" * Used for:")
+            appendLine(" * - LEFT JOIN (right table)")
+            appendLine(" * - RIGHT JOIN (left table)")
+            appendLine(" * - FULL OUTER JOIN (both tables)")
+            appendLine(" * All properties return nullable types because table rows can be NULL.")
+            appendLine(" */")
+            appendLine("class ${table.name}ResultAccessor_All_Nullable(")
+            appendLine("    resultSet: ResultSet,")
+            appendLine("    relations: RelationsContainer,")
+            appendLine("    selectedColumns: List<Column<*>>")
+            appendLine(") : TableResultAccessor(resultSet, relations, selectedColumns) {")
+
+            table.columns.forEach { column ->
+                // Force all properties to nullable
+                val nullableType = if (column.kotlinType.endsWith("?")) column.kotlinType else "${column.kotlinType}?"
+                appendLine("    val ${column.propertyName}: $nullableType")
+                appendLine("        get() = readColumn($schemaPkg.${table.name}.${column.propertyName}) as $nullableType")
                 appendLine()
             }
 
@@ -296,7 +332,7 @@ abstract class GenerateTableMetadataTask : DefaultTask() {
             appendLine("/**")
             appendLine(" * Create a query starting from ${table.name} table")
             appendLine(" */")
-            appendLine("fun from(table: $schemaPkg.${table.name}): AfterFromQueryBuilder_${table.name}<NoColumnsSelected, NoSelections> {")
+            appendLine("fun from(table: $schemaPkg.${table.name}): AfterFromQueryBuilder_${table.name}<NoColumnsSelected, NoSelections, JoinPattern_NONE> {")
             appendLine("    val state = QueryState()")
             appendLine("    state._from = state.relations.relation(table)")
             appendLine("    return AfterFromQueryBuilder_${table.name}(state)")

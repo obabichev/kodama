@@ -50,6 +50,9 @@ class ExecuteAggregateMethodGenerator(
         val markers = markerCombination.markers
         val phantomType = "SelectionSet_" + markers.joinToString("_") { it.interfaceName }
 
+        // JP type constraint to match the specific join pattern (makes this MORE specific than generic execute)
+        val jpConstraint = queryCombination.joinPatternTypeName
+
         // Generate unique JVM name to avoid signature clashes
         val jvmName = "execute_${queryCombination.builderClassName}_${phantomType}"
 
@@ -58,7 +61,7 @@ class ExecuteAggregateMethodGenerator(
         appendLine(" */")
         appendLine("@JvmName(\"$jvmName\")")
         appendLine("fun <$selectionParams>")
-        appendLine("${queryCombination.builderClassName}<$selectionParams, $phantomType>.execute(")
+        appendLine("${queryCombination.builderClassName}<$selectionParams, $phantomType, $jpConstraint>.execute(")
         appendLine("    transaction: com.obabichev.kodama.execute.JdbcTransaction")
         appendLine("): List<${markerCombination.resultClassName}> {")
         appendLine("    val query = this.build()")

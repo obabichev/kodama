@@ -347,12 +347,18 @@ FROM "users"
 
 ### Subqueries
 
+Kodama supports type-safe subqueries in FROM and JOIN clauses with all join types.
+
+#### Subquery in FROM Clause
+
 ```kotlin
-// Subquery in FROM clause
+// Aggregate subquery as the main table
 fromAliased(UserTotals) {
     from(Orders)
         .selectAs(UserName) { orders.userName }
         .selectAs(TotalCost) { sum(orders.cost) }
+        .groupBy { orders.userName }
+        .build()
 }
     .selectAll(UserTotals)
     .execute(transaction)
@@ -361,6 +367,43 @@ fromAliased(UserTotals) {
         val totalCost = row.userTotals.totalCost
     }
 ```
+
+#### Subquery in JOIN Clause
+
+All join types are supported for subqueries:
+
+```kotlin
+// LEFT JOIN with subquery - find all people and their order counts (if any)
+from(Person)
+    .leftJoinAliased(
+        from(Order)
+            .selectAs(OrderUserName) { order.userName }
+            .selectAs(OrderCount) { count(order.id) }
+            .groupBy { order.userName }
+            .build()
+            .aliasAs<OrderCounts>()
+    ) { person.name eq orderCounts.orderUserName }
+    .selectAll(Person)
+    .selectAll(OrderCounts)
+    .execute(transaction)
+    .forEach { row ->
+        val name = row.person.name                // Non-nullable (left side)
+        val orderCount = row.orderCounts.orderCount  // Nullable (right side)
+        println("$name has ${orderCount ?: 0} orders")
+    }
+```
+
+**Available join types for subqueries:**
+- `.joinAliased()` / `.innerJoinAliased()` - INNER JOIN (only matching rows)
+- `.leftJoinAliased()` - LEFT OUTER JOIN (all left rows, matching right rows)
+- `.rightJoinAliased()` - RIGHT OUTER JOIN (matching left rows, all right rows)
+- `.fullJoinAliased()` - FULL OUTER JOIN (all rows from both sides)
+
+**Join-type-aware nullability:**
+- INNER JOIN: Both sides non-nullable
+- LEFT JOIN: Left side non-nullable, right side nullable
+- RIGHT JOIN: Left side nullable, right side non-nullable
+- FULL OUTER JOIN: Both sides nullable
 
 ### INSERT Statements
 

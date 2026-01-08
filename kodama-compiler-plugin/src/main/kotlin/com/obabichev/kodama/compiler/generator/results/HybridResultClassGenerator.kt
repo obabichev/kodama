@@ -69,7 +69,14 @@ class HybridResultClassGenerator(
         // Add table accessor properties
         allColumnsTables.forEachIndexed { index, table ->
             val comma = if (index < allColumnsTables.size - 1) "," else ""
-            appendLine("    val ${table.camelCaseName}: ${table.capitalizedName}ResultAccessor_All$comma")
+            // For hybrid results, table is always base table (non-nullable)
+            // Use NonNull variant unless it's a subquery (subqueries don't have variants yet)
+            val accessorVariant = if (table.isSubquery) {
+                "${table.capitalizedName}ResultAccessor_All"
+            } else {
+                "${table.capitalizedName}ResultAccessor_All_NonNull"
+            }
+            appendLine("    val ${table.camelCaseName}: $accessorVariant$comma")
         }
 
         appendLine(") : com.obabichev.kodama.query.QueryResult")
