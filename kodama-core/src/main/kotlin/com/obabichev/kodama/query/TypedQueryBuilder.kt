@@ -8,6 +8,7 @@ import com.obabichev.kodama.components.TypedColumn
 import com.obabichev.kodama.components.expression.Expression
 import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.schema.TableSource
+import com.obabichev.kodama.util.toSnakeCase
 
 /**
  * Marker for selection types
@@ -224,9 +225,7 @@ class QueryState {
         when (expression) {
             is AggregateFunction<*> -> {
                 // For aggregates, use snake_case alias directly
-                val sqlAlias = camelCaseAlias
-                    .replace(Regex("([a-z])([A-Z])"), "$1_$2")
-                    .lowercase()
+                val sqlAlias = camelCaseAlias.toSnakeCase()
                 expression.alias(sqlAlias)
                 _aggregateSelections.add(expression)
             }
@@ -241,9 +240,7 @@ class QueryState {
             else -> {
                 // For general expressions (comparisons, arithmetic, etc.)
                 // Convert to snake_case for SQL alias consistency
-                val sqlAlias = camelCaseAlias
-                    .replace(Regex("([a-z])([A-Z])"), "$1_$2")
-                    .lowercase()
+                val sqlAlias = camelCaseAlias.toSnakeCase()
                 _selectables.add(ExpressionSelectable(sqlAlias, expression))
             }
         }
@@ -263,10 +260,7 @@ class QueryState {
 
         // Read the value from the result set
         // The SQL alias was set as snake_case version of the marker name
-        val sqlAlias = markerName
-            .replaceFirstChar { it.lowercase() }
-            .replace(Regex("([a-z])([A-Z])"), "$1_$2")
-            .lowercase()
+        val sqlAlias = markerName.replaceFirstChar { it.lowercase() }.toSnakeCase()
 
         // Get the value from result set
         return resultSet.getObject(sqlAlias)

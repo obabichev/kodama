@@ -1,5 +1,7 @@
 package com.obabichev.kodama.query
 
+import com.obabichev.kodama.util.toSnakeCase
+
 /**
  * Core abstraction for anything that can be selected in a query with an alias.
  * This includes aggregates, constants, subqueries, window functions, computed columns, etc.
@@ -94,7 +96,7 @@ class ColumnSelectable(
     override val type: SelectableType = SelectableType.COMPUTED
 
     /** SQL column alias in snake_case (e.g., "person_name") */
-    val sqlAlias: String = alias.replace(Regex("([a-z])([A-Z])"), "$1_$2").lowercase()
+    val sqlAlias: String = alias.toSnakeCase()
 
     override fun getValue(resultSet: java.sql.ResultSet, position: Int): Any? {
         return resultSet.getObject(position)

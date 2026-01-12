@@ -1,5 +1,6 @@
 package com.obabichev.kodama.query
 
+import com.obabichev.kodama.util.toSnakeCase
 import kotlin.reflect.KClass
 
 /**
@@ -48,8 +49,7 @@ inline fun <reified T : Any> Query.aliasAs(): T {
         // This should not happen in normal usage with properly generated code
         val aliasName = markerClass.simpleName
             ?.replaceFirstChar { it.lowercase() }
-            ?.replace(Regex("([a-z])([A-Z])"), "$1_$2")
-            ?.lowercase()
+            ?.toSnakeCase()
             ?: error("Cannot derive alias name from marker class")
 
         error("SubqueryRegistry not found for marker ${markerClass.simpleName}. " +

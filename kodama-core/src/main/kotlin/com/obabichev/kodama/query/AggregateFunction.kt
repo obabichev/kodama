@@ -2,6 +2,7 @@ package com.obabichev.kodama.query
 
 import com.obabichev.kodama.components.Column
 import com.obabichev.kodama.components.expression.Expression
+import com.obabichev.kodama.util.toSnakeCase
 
 /**
  * Base class for aggregate functions (SUM, COUNT, AVG, MIN, MAX)
@@ -123,10 +124,7 @@ inline fun <reified T : Any> AggregateFunction<*>.aliasAs(): AliasedExpression<T
         ?: throw IllegalArgumentException("Marker must be a named interface")
 
     // Convert PascalCase to snake_case for SQL alias
-    val sqlAlias = interfaceName
-        .replaceFirstChar { it.lowercase() }
-        .replace(Regex("([a-z])([A-Z])"), "$1_$2")
-        .lowercase()
+    val sqlAlias = interfaceName.replaceFirstChar { it.lowercase() }.toSnakeCase()
 
     // Set the alias on the aggregate function itself
     this.alias(sqlAlias)

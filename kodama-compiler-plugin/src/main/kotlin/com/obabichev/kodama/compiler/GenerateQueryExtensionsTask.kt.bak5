@@ -4,9 +4,6 @@ import com.obabichev.kodama.compiler.metadata.KspMetadataLoader
 import com.obabichev.kodama.compiler.metadata.RuntimeMetadataExtractor
 import com.obabichev.kodama.compiler.metadata.TableMetadata
 import com.obabichev.kodama.compiler.parser.ASTQueryDiscoveryIntegration
-import com.obabichev.kodama.compiler.parser.DiscoveredMarkers
-import com.obabichev.kodama.compiler.parser.QueryOperation
-import com.obabichev.kodama.compiler.parser.SubqueryPattern
 import com.obabichev.kodama.compiler.util.toSnakeCase
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -376,10 +373,11 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
         }
 
         // ==============================================
-        // EXTRACT DATA FROM AST DISCOVERY
+        // MARKER AND SUBQUERY DISCOVERY
+        // Using AST-based discovery (zero regex!)
         // ==============================================
 
-        // Extract marker data from AST discovery
+        // Use AST-discovered markers
         val usedColumnMarkers = astMarkers.markerTypes.keys.toMutableSet()
         val markerTypes = astMarkers.markerTypes.toMutableMap()
         val markerAliasStyles = astMarkers.markerAliasStyles.toMutableMap()
@@ -389,9 +387,14 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
         logger.lifecycle("  - Markers: ${usedColumnMarkers.size}")
         logger.lifecycle("  - Types inferred: ${markerTypes.size}")
 
-        // Extract subquery data from AST discovery
+        // Use AST-discovered subqueries (if any)
         val subqueriesFromAST = astSubqueries.associateBy { it.alias }
         logger.lifecycle("  - Subqueries: ${subqueriesFromAST.size}")
+
+
+
+        // Query combinations are handled by relationship-based generation below
+        // AST validation already logged at lines 301-354
 
         // ==============================================
         // CONVERT AST DATA TO GENERATOR FORMAT
@@ -408,7 +411,7 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
         // Convert AST markers to SelectionMarkerInfo format
         markerTypes.forEach { (markerName, kotlinType) ->
             val aliasStyle = markerAliasStyles[markerName] ?: "SNAKE_CASE"
-            val propertyName = markerName.replaceFirstChar { it.lowercase() }  // TotalCost -> totalCost
+            val propertyName = markerName.replaceFirstChar { it.lowercaseChar() }  // TotalCost -> totalCost
 
             selectionMarkers.add(SelectionMarkerInfo(
                 interfaceName = markerName,
@@ -426,10 +429,10 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
 
             // Extract columns from the subquery pattern
             val columns = subqueryPattern.operations
-                .filter { op: QueryOperation -> op.type == com.obabichev.kodama.compiler.parser.OperationType.SELECT_ALIASED }
-                .map { op: QueryOperation ->
+                .filter { op -> op.type == com.obabichev.kodama.compiler.parser.OperationType.SELECT_ALIASED }
+                .map { op ->
                     SubqueryColumnInfo(
-                        propertyName = (op.marker ?: "value").replaceFirstChar { it.lowercase() },
+                        propertyName = (op.marker ?: "value").replaceFirstChar { it.lowercaseChar() },
                         sqlColumnName = (op.marker ?: "value").lowercase(),
                         kotlinType = markerTypes[op.marker] ?: "String",
                         isMarkerBased = true
