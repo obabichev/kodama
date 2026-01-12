@@ -5,45 +5,63 @@ import com.obabichev.kodama.schema.EntityTable
 import com.obabichev.kodama.schema.primaryKey
 import com.obabichev.kodama.schema.nullable
 import com.obabichev.kodama.schema.identity
-// Temporarily commented out for KSP migration testing
-// import com.obabichev.kodama.tests.entity.User
-// import com.obabichev.kodama.tests.entity.UserOrder
-// import com.obabichev.kodama.entity.oneToMany
-// import com.obabichev.kodama.entity.manyToOne
+import com.obabichev.kodama.tests.entity.User
+import com.obabichev.kodama.tests.entity.UserOrder
+import com.obabichev.kodama.entity.oneToMany as entityOneToMany
+import com.obabichev.kodama.entity.manyToOne as entityManyToOne
+import com.obabichev.kodama.query.oneToMany
+import com.obabichev.kodama.query.manyToOne
 
 /**
- * Person table definition
+ * Person table definition with query relationships
  */
 object Person : Table("person") {
     val name = varchar("name", 255).primaryKey()
     val age = integer("age")
+
+    // Query relationships for compile-time join validation
+    val orders = oneToMany(Order, Order.userName, this.name)
+    val profile = oneToMany(Profile, Profile.userName, this.name)
 }
 
 /**
- * Order table definition
+ * Order table definition with query relationships
  */
 object Order : Table("order") {
     val id = integer("id").primaryKey()
     val userName = varchar("user_name", 255)
     val product = varchar("product", 255)
     val cost = integer("cost")
+    val companyId = integer("company_id").nullable()  // Optional company reference
+
+    // Query relationships:
+    // - Order belongs to Person (many-to-one)
+    // - Order belongs to Company (many-to-one) - enables transitive joins: Person → Order → Company
+    val person = manyToOne(Person, this.userName, Person.name)
+    val company = manyToOne(Company, this.companyId, Company.id)
 }
 
 /**
- * Profile table definition
+ * Profile table definition with query relationships
  */
 object Profile : Table("profile") {
     val userName = varchar("user_name", 255)
     val contact = varchar("contact", 255)
     val photo = varchar("photo", 255).nullable()  // Photo can be null
+
+    // Query relationship: Profile belongs to Person
+    val person = manyToOne(Person, this.userName, Person.name)
 }
 
 /**
- * Company table definition
+ * Company table definition with query relationships
  */
 object Company : Table("company") {
     val id = integer("id").primaryKey()
     val companyName = varchar("company_name", 255)
+
+    // Query relationship: Company has many Orders
+    val orders = oneToMany(Order, Order.companyId, this.id)
 }
 
 /**
@@ -87,8 +105,6 @@ object Numerics : Table("numerics") {
     val nullableDouble = doublePrecision("nullable_double").nullable()
 }
 
-// Temporarily commented out for KSP migration testing (requires entity layer)
-/*
 /**
  * UserOrders entity table - orders placed by users.
  * Demonstrates one-to-many relationship with Users.
@@ -117,13 +133,10 @@ object UserOrders : EntityTable<UserOrder>("user_orders") {
      * Defined in init block to ensure columns are initialized first.
      */
     init {
-        manyToOne("user", Users, this.userId, Users.id)
+        entityManyToOne("user", Users, this.userId, Users.id)
     }
 }
-*/
 
-// Temporarily commented out for KSP migration testing (requires entity layer)
-/*
 /**
  * Users entity table - example EntityTable with ORM support.
  *
@@ -155,10 +168,9 @@ object Users : EntityTable<User>("users") {
      * Defined in init block to ensure columns are initialized first.
      */
     init {
-        oneToMany("orders", UserOrders, UserOrders.userId, this.id)
+        entityOneToMany("orders", UserOrders, UserOrders.userId, this.id)
     }
 }
-*/
 
 /**
  * TradingStrategy table - PascalCase naming test.
@@ -168,6 +180,9 @@ object TradingStrategy : Table("trading_strategy") {
     val id = integer("id").primaryKey()
     val strategyName = varchar("strategy_name", 255)
     val description = varchar("description", 500).nullable()
+
+    // Query relationship: TradingStrategy has many MarketData
+    val marketDataPoints = oneToMany(MarketData, MarketData.strategyId, this.id)
 }
 
 /**
@@ -179,6 +194,9 @@ object MarketData : Table("market_data") {
     val strategyId = integer("strategy_id")
     val timestamp = varchar("timestamp", 50)
     val price = integer("price")
+
+    // Query relationship: MarketData belongs to TradingStrategy
+    val strategy = manyToOne(TradingStrategy, this.strategyId, TradingStrategy.id)
 }
 
 /**

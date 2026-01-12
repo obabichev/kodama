@@ -53,9 +53,10 @@ class TestDataBuilder(private val transaction: JdbcTransaction) {
         id: Int,
         userName: String,
         product: String,
-        cost: Int
+        cost: Int,
+        companyId: Int? = null
     ): InsertedOrder {
-        Order.insert(transaction, id, userName, product, cost)
+        Order.insert(transaction, id, userName, product, cost, companyId)
         return InsertedOrder(id, userName, product, cost)
     }
 

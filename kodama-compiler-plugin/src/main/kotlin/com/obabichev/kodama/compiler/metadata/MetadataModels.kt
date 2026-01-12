@@ -38,9 +38,23 @@ data class TableMetadata(
 )
 
 /**
+ * Marker interface metadata from KSP JSON file.
+ * Represents empty interfaces used for type-safe query result access.
+ */
+@Serializable
+data class KspMarkerMetadata(
+    val name: String,
+    @SerialName("package")
+    val packageName: String,
+    val qualifiedName: String,
+    val hasMarkerAnnotation: Boolean = false
+)
+
+/**
  * Root structure for KSP metadata JSON.
  */
 @Serializable
 data class KspMetadataRoot(
-    val tables: List<KspTableMetadata>
+    val tables: List<KspTableMetadata>,
+    val markers: List<KspMarkerMetadata> = emptyList()  // Default to empty for backward compatibility
 )

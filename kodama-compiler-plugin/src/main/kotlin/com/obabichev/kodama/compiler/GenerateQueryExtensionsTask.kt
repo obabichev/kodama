@@ -3,6 +3,9 @@ package com.obabichev.kodama.compiler
 import com.obabichev.kodama.compiler.metadata.KspMetadataLoader
 import com.obabichev.kodama.compiler.metadata.RuntimeMetadataExtractor
 import com.obabichev.kodama.compiler.metadata.TableMetadata
+import com.obabichev.kodama.compiler.util.toSnakeCase
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
@@ -42,6 +45,70 @@ internal data class SelectionMarkerInfo(
 )
 
 /**
+ * JSON data classes for parsing relationships.json.
+ * Used by kotlinx.serialization to deserialize the relationships file.
+ */
+@Serializable
+internal data class RelationshipJson(
+    val from: String,
+    val to: String
+)
+
+@Serializable
+internal data class RelationshipsFileJson(
+    val `package`: String,
+    val relationships: List<RelationshipJson>
+)
+
+/**
+ * Holds relationship metadata loaded from KSP-generated relationships.json.
+ * This tells us which table pairs have CanJoin instances and can have
+ * compile-time join validation.
+ * @param relationships Set of table pairs that have declared relationships
+ */
+data class RelationshipMetadata(
+    val relationships: Set<Pair<String, String>>  // (From, To) pairs
+) {
+    /**
+     * Check if a direct relationship exists between two tables.
+     */
+    fun hasRelationship(from: String, to: String): Boolean =
+        relationships.contains(from to to)
+
+    /**
+     * Check if a join is valid from a set of already-joined tables to a target table.
+     *
+     * This supports transitive relationships:
+     * - Direct: hasRelationshipFrom([Person], Order) → checks Person→Order
+     * - Transitive: hasRelationshipFrom([Person, Order], Company) → checks Person→Company OR Order→Company
+     *
+     * Returns true if ANY of the already-joined tables has a relationship to the target.
+     */
+    fun hasRelationshipFrom(alreadyJoinedTables: List<String>, targetTable: String): Boolean {
+        return alreadyJoinedTables.any { fromTable ->
+            hasRelationship(fromTable, targetTable)
+        }
+    }
+
+    /**
+     * Get all tables that can be joined from a given table.
+     */
+    fun getReachableTables(from: String): Set<String> {
+        return relationships
+            .filter { it.first == from }
+            .map { it.second }
+            .toSet()
+    }
+
+    /**
+     * Get all tables that can be joined from any of the given tables (transitive closure).
+     */
+    fun getReachableTablesFrom(fromTables: List<String>): Set<String> {
+        return fromTables.flatMap { getReachableTables(it) }.toSet()
+    }
+}
+
+/**
  * Phase 2: Pattern-Driven Code Generation
  *
  * Generates code based on query usage patterns discovered in test files.
@@ -71,6 +138,9 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
 
     @get:Input
     abstract val generatedPackage: Property<String>
+
+    @get:Input
+    abstract val maxTableCount: Property<Int>
 
     @get:OutputDirectory
     abstract val outputDirectory: DirectoryProperty
@@ -133,6 +203,52 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
         logger.lifecycle("Kodama Phase 2: Loaded metadata for ${tableMetadata.size} tables")
 
         return tableMetadata
+    }
+
+    /**
+     * Load relationship metadata from KSP-generated relationships.json file.
+     * This metadata tells us which table pairs have declared relationships and
+     * CanJoin instances, allowing us to add compile-time join validation.
+     */
+    private fun loadRelationshipMetadata(): RelationshipMetadata {
+        val buildDir = project.layout.buildDirectory.get().asFile
+
+        // Try multiple possible locations for relationships.json
+        val possibleLocations = listOf(
+            buildDir.resolve("generated/ksp/main/resources/relationships.json"),
+            buildDir.resolve("resources/main/relationships.json"),
+            buildDir.resolve("kspCaches/main/backups/resources/relationships.json")
+        )
+
+        val relationshipsFile = possibleLocations.firstOrNull { it.exists() }
+
+        if (relationshipsFile == null || !relationshipsFile.exists()) {
+            logger.lifecycle("Kodama Phase 2: No relationships.json found, CanJoin constraints will not be generated")
+            logger.info("Kodama: Searched in: ${possibleLocations.joinToString(", ") { it.absolutePath }}")
+            return RelationshipMetadata(emptySet())
+        }
+
+        logger.lifecycle("Kodama Phase 2: Loading relationships from ${relationshipsFile.name}")
+
+        try {
+            val jsonContent = relationshipsFile.readText()
+
+            // Parse JSON using kotlinx.serialization (type-safe, no regex!)
+            val json = Json { ignoreUnknownKeys = true }
+            val data = json.decodeFromString<RelationshipsFileJson>(jsonContent)
+
+            val relationships = data.relationships.map { it.from to it.to }.toSet()
+
+            relationships.forEach { (from, to) ->
+                logger.info("Kodama: Found relationship: $from -> $to")
+            }
+
+            logger.lifecycle("Kodama Phase 2: Loaded ${relationships.size} relationship(s)")
+            return RelationshipMetadata(relationships)
+        } catch (e: Exception) {
+            logger.warn("Kodama Phase 2: Failed to load relationships.json: ${e.message}")
+            return RelationshipMetadata(emptySet())
+        }
     }
 
     @TaskAction
@@ -310,6 +426,13 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
         testKtFiles.forEach { file ->
             val content = file.readText()
 
+            // === REGEX USAGE: Pattern Discovery ===
+            // The following regex patterns are used for PATTERN DISCOVERY, which is an appropriate use case.
+            // We're mining test files to find usage patterns (from/join/select combinations).
+            // Alternative: Full Kotlin AST parsing would be overkill and slower for this purpose.
+            // These patterns don't parse structured data - they discover usage patterns.
+            // See REGEX_ELIMINATION_PLAN.md for guidelines on when regex is appropriate.
+
             // Find all query chains with their markers
             // Pattern: from(Table1).join(Table2)....selectAliased(Marker) { ... }
             val queryWithMarkerPattern = """from\s*\(\s*([A-Z]\w+)\s*\)((?:\s*\.(?:join|leftJoin|joinAliased|leftJoinAliased)\s*\([^)]*\)(?:\s*\{[^}]*\})?)*)((?:\s*\.select(?:All|Aliased)?[^.]*)*)\s*\.selectAliased\s*\(\s*([A-Z]\w+)\s*\)""".toRegex()
@@ -437,9 +560,7 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
             val (subqueryBody, _) = matches.minByOrNull { it.first.length } ?: return@forEach
 
             // Convert PascalCase to snake_case for SQL alias
-            val sqlAlias = subqueryName
-                .replace(Regex("([a-z])([A-Z])"), "$1_$2")
-                .lowercase()
+            val sqlAlias = subqueryName.toSnakeCase()
 
             // Extract columns from the subquery
             val columns = mutableListOf<SubqueryColumnInfo>()
@@ -472,13 +593,9 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
 
                 // Convert marker name to camelCase for property accessor (MyAlias -> myAlias)
                 val propertyName = markerName.replaceFirstChar { it.lowercase() }
-                // Determine SQL alias style based on the expression (aggregates use camelCase, others use snake_case)
-                val aliasStyle = inferSqlAliasStyle(expressionBody)
-                val sqlAlias = if (aliasStyle == "CAMEL_CASE") {
-                    propertyName  // camelCase for aggregates
-                } else {
-                    propertyName.replace(Regex("([a-z])([A-Z])"), "$1_$2").lowercase()  // snake_case for columns
-                }
+                // Always use snake_case for SQL column names (matches TypedQueryBuilder behavior)
+                // MyAlias -> myAlias -> my_alias
+                val sqlAlias = propertyName.toSnakeCase()
 
                 // Try to extract source column from aggregate expression like "sum(order.cost)"
                 val aggregateColumnPattern = """(sum|count|avg|min|max)\s*\(\s*(\w+)\.(\w+)\s*\)""".toRegex()
@@ -613,24 +730,62 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
             return interfaceName.replaceFirstChar { it.lowercase() }
         }
 
-        // Scan both test files and schema files for marker interfaces
+        // Load markers from KSP metadata (primary source)
+        val metadataLoader = KspMetadataLoader()
+        val kspMetadataPath = kspMetadataFile.get().asFile
+
+        if (kspMetadataPath.exists()) {
+            try {
+                val kspMarkers = metadataLoader.loadMarkers(kspMetadataPath)
+                kspMarkers.forEach { marker ->
+                    val propertyName = interfaceNameToPropertyName(marker.name)
+                    // Avoid conflicts with table names
+                    if (!tables.contains(marker.name)) {
+                        val type = markerTypes[marker.name] ?: "Number"
+                        val aliasStyle = markerAliasStyles[marker.name] ?: "SNAKE_CASE"
+                        selectionMarkers.add(
+                            SelectionMarkerInfo(
+                                marker.name,
+                                propertyName,
+                                marker.packageName,
+                                type,
+                                aliasStyle
+                            )
+                        )
+                    }
+                }
+                logger.info("Kodama: Loaded ${kspMarkers.size} marker(s) from KSP metadata")
+            } catch (e: Exception) {
+                logger.warn("Kodama: Failed to load markers from KSP metadata: ${e.message}")
+            }
+        }
+
+        // === REGEX USAGE: Fallback for Test Sources ===
+        // Fallback: Regex-based discovery for test sources (KSP might not process test code)
+        // This ensures backward compatibility and handles markers defined in test files
+        // Justified because:
+        // 1. KSP may not process test sources depending on configuration
+        // 2. Provides backward compatibility for projects without @Marker annotation
+        // 3. Pattern discovery (finding interface declarations) is an appropriate use of regex
         val allSourceFiles = (schemaKtFiles.toList() + testKtFiles.toList()).asSequence()
         allSourceFiles.forEach { file ->
             val content = file.readText()
 
-            // Extract package name from file
+            // Extract package name from file (lightweight, no need for full parsing)
             val packagePattern = """package\s+([\w.]+)""".toRegex()
             val packageName = packagePattern.find(content)?.groupValues?.get(1) ?: genPkg
 
             // Match empty interfaces: interface XxxYyy with no body or empty body
-            // This regex matches:
-            // - interface Name
-            // - interface Name { }
-            // - interface Name : SuperInterface
-            // But NOT interfaces with members
+            // This regex discovers interface declarations - pattern discovery use case
             val markerPattern = """(?:^|\n)\s*interface\s+([A-Z]\w+)(?:\s*:\s*[\w.]+)?(?:\s*\{\s*\}|\s*(?=\n|$))""".toRegex()
             markerPattern.findAll(content).forEach { match ->
                 val interfaceName = match.groupValues[1]
+
+                // Skip if already discovered by KSP
+                if (selectionMarkers.any { it.interfaceName == interfaceName }) {
+                    return@forEach
+                }
+
                 val propertyName = interfaceNameToPropertyName(interfaceName)
 
                 // Avoid conflicts with table names
@@ -726,7 +881,7 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
             newSubqueryMarkers.forEach { markerName ->
                 val newSubquery = SubqueryInfo(
                     markerName,
-                    markerName.replace(Regex("([a-z])([A-Z])"), "$1_$2").lowercase(),
+                    markerName.toSnakeCase(),
                     template.columns,
                     template.sourceTables
                 )
@@ -769,21 +924,13 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
             combinationJoinTypes[tableName] = listOf(tableName to null)  // Single table, no join
         }
 
-        // NEW: Discover selection patterns (which columns are actually selected)
+        // Discover selection patterns (which columns are actually selected)
         // Maps table combination to set of selection patterns
         // Example: [person, order] -> [["person:All", "order:Product"], ["person:Name", "order:All"]]
         val selectionPatterns = mutableMapOf<List<String>, MutableSet<List<String>>>()
 
-        // NEW: Discover selection patterns using pluggable scanners
-        val scanners = listOf<SelectionPatternScanner>(
-            AggregateScanner(),
-            MarkerBasedSelectionScanner()
-            // Easy to add more: ConstantScanner(), SubqueryScanner(), WindowFunctionScanner()
-        )
-
-        // Maps table combination to set of selection patterns
-        // Example: [order] -> [SelectionPattern([order], [Selection("totalRevenue", AGGREGATE), Selection("orderCount", AGGREGATE)])]
-        val selectionPatternsByTable = mutableMapOf<List<String>, MutableSet<SelectionPattern>>()
+        // NOTE: The old SelectionPatternScanner classes have been removed.
+        // Marker discovery is now done directly via regex scanning of test files (see lines 700-780).
 
         // Reuse testFiles from subquery scanning
         testKtFiles.forEach { file ->
@@ -797,21 +944,13 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
                 ".fromAliased_PLACEHOLDER(${matchResult.groupValues[2]})"
             }
 
-            // SECOND: Scan subquery blocks for selection patterns AND table combinations BEFORE removing them
+            // SECOND: Scan subquery blocks for table combinations BEFORE removing them
             val subqueryPattern = """subquery_([A-Z][a-zA-Z0-9]*)\s*\{([\s\S]*?\.build\(\))""".toRegex()
             subqueryPattern.findAll(content).forEach { match ->
                 val subqueryName = match.groupValues[1]
                 val subqueryBody = match.groupValues[2]  // The query builder code inside subquery INCLUDING .build()
 
-                // Scan the subquery body for selection patterns
-                scanners.forEach { scanner ->
-                    val patterns = scanner.scanFile(subqueryBody, tableNameMap)
-                    patterns.forEach { pattern ->
-                        selectionPatternsByTable.getOrPut(pattern.tables) { mutableSetOf() }.add(pattern)
-                    }
-                }
-
-                // CRITICAL: Also extract table combinations from subquery bodies
+                // CRITICAL: Extract table combinations from subquery bodies
                 // Without this, tables used only in subqueries won't have builders generated
                 val tableRefPattern = """(?:from|join|leftJoin)\s*\(\s*(\w+)""".toRegex()  // Exclude fromAliased/joinAliased
                 val tablesInSubquery = mutableListOf<String>()
@@ -844,136 +983,13 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
             // NOW remove subquery definitions to avoid treating them as regular query patterns
             content = subqueryPattern.replace(content, "")  // Remove subquery blocks
 
-            // Use scanners to detect selection patterns in regular queries
-            scanners.forEach { scanner ->
-                val patterns = scanner.scanFile(content, tableNameMap)
-                patterns.forEach { pattern ->
-                    selectionPatternsByTable.getOrPut(pattern.tables) { mutableSetOf() }.add(pattern)
-                }
-            }
+            // ===================================================================
+            // REMOVED: Old test file scanning for table combinations
+            // Now using relationship-based generation instead
+            // ===================================================================
 
-            // Match query chains: from(Table).join(Table)...
-            // Look for from(...) and then capture everything until .select or .where or end
-            // Includes joinAliased and leftJoinAliased for subquery joins
-            // Also includes rightJoin and fullJoin for complete join type coverage
-            val queryChainPattern = """from\s*\([^)]+\)(?:\s*\.(?:join|innerJoin|leftJoin|rightJoin|fullJoin|joinAliased|leftJoinAliased)\s*\([^)]+\)(?:\s*\{[^}]*\})?)*""".toRegex()
-
-            queryChainPattern.findAll(content).forEach { chainMatch ->
-                val chain = chainMatch.value
-                val typesInChain = mutableListOf<String>()
-                val joinTypesInChain = mutableListOf<String?>()  // Track join type for each table
-
-                // Extract table names AND join types from the chain
-                // Capture: (join method)(table name)
-                val tableRefPattern = """(from|fromAliased|join|innerJoin|leftJoin|rightJoin|fullJoin|joinAliased|leftJoinAliased|rightJoinAliased|fullJoinAliased)\s*\(\s*(\w+)""".toRegex()
-                tableRefPattern.findAll(chain).forEach { typeMatch ->
-                    val joinMethod = typeMatch.groupValues[1]
-                    val tableRef = typeMatch.groupValues[2]
-
-                    // Map join method to JoinType
-                    val joinType = when (joinMethod) {
-                        "from", "fromAliased" -> null  // Base table, no join type
-                        "join", "innerJoin", "joinAliased" -> "INNER"
-                        "leftJoin", "leftJoinAliased" -> "LEFT"
-                        "rightJoin", "rightJoinAliased" -> "RIGHT"
-                        "fullJoin", "fullJoinAliased" -> "FULL"
-                        else -> null
-                    }
-
-                    when {
-                        // Check if this is a subquery variable
-                        subqueryVarMap.containsKey(tableRef) -> {
-                            // It's a subquery variable - use the subquery name
-                            val subqueryName = subqueryVarMap[tableRef]!!
-                            typesInChain.add(subqueryName)
-                            joinTypesInChain.add(joinType)
-                        }
-                        // Check if this is a subquery marker interface (used directly in joinAliased/leftJoinAliased)
-                        subqueries.containsKey(tableRef) -> {
-                            // It's a subquery marker - use it directly
-                            typesInChain.add(tableRef)
-                            joinTypesInChain.add(joinType)
-                        }
-                        // Otherwise, it's a regular table
-                        else -> {
-                            val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef  // Use original case
-
-                            // Only add if it's a capitalized table name (real table)
-                            if (tableRef[0].isUpperCase()) {
-                                typesInChain.add(tableName)
-                                joinTypesInChain.add(joinType)
-                            }
-                        }
-                    }
-                }
-
-                // Store all prefixes with their join types
-                if (typesInChain.isNotEmpty()) {
-                    for (i in 1..typesInChain.size) {
-                        val subCombination = typesInChain.take(i)
-                        queryCombinations.add(subCombination)
-
-                        // Store join types for this combination
-                        val joinTypesForCombination = typesInChain.take(i).zip(joinTypesInChain.take(i))
-
-                        // Include join pattern in key to distinguish different join types for same tables
-                        // Example: "Person_Order:INNER" vs "Person_Order:LEFT"
-                        val tableNames = subCombination.joinToString("_")
-                        val joinPattern = joinTypesInChain.take(i).drop(1).filterNotNull().joinToString("_")  // Skip first (base table has no join)
-                        val combinationKey = if (joinPattern.isEmpty()) tableNames else "$tableNames:$joinPattern"
-
-                        combinationJoinTypes[combinationKey] = joinTypesForCombination
-                    }
-                }
-            }
-
-            // NEW: Scan for inline subqueries in join/from clauses
-            // Matches: .joinAliased( from(...)...aliasAs<SubqueryName>() ) or .fromAliased( from(...)...aliasAs<SubqueryName>() )
-            val inlineSubqueryPattern = """\.(?:from|fromAliased|join|joinAliased|leftJoin|leftJoinAliased|rightJoin|rightJoinAliased|fullJoin|fullJoinAliased)\s*\(\s*from[\s\S]*?\.aliasAs<([A-Z]\w+)>\(\)\s*\)""".toRegex()
-            inlineSubqueryPattern.findAll(content).forEach { match ->
-                val subqueryName = match.groupValues[1]
-                val matchStart = match.range.first
-
-                // Find the query builder this inline subquery is used with
-                // Look backward from the match to find the most recent from(Table) or .join(Table) before this inline subquery
-                val precedingContent = content.substring(0, matchStart)
-
-                // Find all query chains before this point
-                val precedingChainPattern = """from\s*\(\s*(\w+)\s*\)(?:\s*\.(?:join|leftJoin)\s*\(\s*(\w+)\s*\)(?:\s*\{[^}]*\})?)*""".toRegex()
-                val chains = precedingChainPattern.findAll(precedingContent).toList()
-
-                if (chains.isNotEmpty()) {
-                    // Get the last chain before this inline subquery - that's the query builder that uses it
-                    val lastChain = chains.last()
-                    val tablesInChain = mutableListOf<String>()
-
-                    // Extract tables from the chain
-                    val tableRefPattern = """(?:from|fromAliased|join|joinAliased|leftJoin|leftJoinAliased)\s*\(\s*(\w+)""".toRegex()
-                    tableRefPattern.findAll(lastChain.value).forEach { tableMatch ->
-                        val tableRef = tableMatch.groupValues[1]
-                        if (subqueryVarMap.containsKey(tableRef)) {
-                            tablesInChain.add(subqueryVarMap[tableRef]!!)
-                        } else {
-                            val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef
-                            if (tableRef[0].isUpperCase()) {
-                                tablesInChain.add(tableName)
-                            }
-                        }
-                    }
-
-                    // Now add combination of tablesInChain + subqueryName
-                    if (tablesInChain.isNotEmpty()) {
-                        val combinationWithSubquery = tablesInChain + subqueryName
-                        queryCombinations.add(combinationWithSubquery)
-                        // Also add all prefixes
-                        for (i in 1..combinationWithSubquery.size) {
-                            queryCombinations.add(combinationWithSubquery.take(i))
-                        }
-                    }
-                }
-            }
-
-            // NEW: Detect joinAliased/leftJoinAliased with .aliasAs<Type>() pattern
+            // Still scan for Table+Subquery combinations (these are explicitly defined)
+            // Detect joinAliased/leftJoinAliased with .aliasAs<Type>() pattern
             // Matches: from(Table).joinAliased( ... .aliasAs<SubqueryMarker>() ) { condition }
             val aliasAsJoinPattern = """from\s*\(\s*(\w+)\s*\)[\s\S]*?\.(?:joinAliased|leftJoinAliased)\s*\([\s\S]*?\.aliasAs<(\w+)>\(\)[\s\S]*?\)\s*\{""".toRegex()
             aliasAsJoinPattern.findAll(content).forEach { match ->
@@ -1273,6 +1289,82 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
             }
         }
 
+        // ==============================================
+        // NEW: Generate table combinations from relationships
+        // ==============================================
+
+        // Load relationship metadata BEFORE transformation
+        val relationshipMetadata = loadRelationshipMetadata()
+
+        if (relationshipMetadata.relationships.isNotEmpty()) {
+            logger.lifecycle("Kodama Phase 2: Generating combinations from ${relationshipMetadata.relationships.size} declared relationships")
+
+            // Track which combinations we've already added (to avoid duplicates)
+            val existingCombinations = queryCombinations.toSet()
+
+            // Generate direct relationship combinations (2 tables)
+            // For each relationship, generate all join type variants (INNER, LEFT, RIGHT, FULL)
+            relationshipMetadata.relationships.forEach { (from, to) ->
+                val combination = listOf(from, to)
+                if (!existingCombinations.contains(combination)) {
+                    queryCombinations.add(combination)
+
+                    // Add all join type variants
+                    val baseKey = combination.joinToString("_")
+                    combinationJoinTypes[baseKey] = listOf(from to null, to to "INNER")
+                    combinationJoinTypes["$baseKey:LEFT"] = listOf(from to null, to to "LEFT")
+                    combinationJoinTypes["$baseKey:RIGHT"] = listOf(from to null, to to "RIGHT")
+                    combinationJoinTypes["$baseKey:FULL"] = listOf(from to null, to to "FULL")
+
+                    logger.info("  Added direct relationship: $from → $to (all join types)")
+                }
+            }
+
+            // Generate transitive relationship combinations (3+ tables)
+            // For each 2-table combination, check if we can add a third table
+            val twoTableCombos = queryCombinations.filter { it.size == 2 && it.all { name -> tables.contains(name) } }
+            twoTableCombos.forEach { combo ->
+                val (table1, table2) = combo
+
+                // Find tables reachable from either table1 or table2
+                val reachableFromEither = relationshipMetadata.getReachableTablesFrom(listOf(table1, table2))
+
+                reachableFromEither.forEach { table3 ->
+                    // Only add if table3 is not already in the combination
+                    if (!combo.contains(table3)) {
+                        val threeTableCombo = combo + table3
+                        if (!existingCombinations.contains(threeTableCombo)) {
+                            queryCombinations.add(threeTableCombo)
+
+                            // Add all join type variants for 3-table combinations too
+                            val baseKey = threeTableCombo.joinToString("_")
+                            combinationJoinTypes[baseKey] = listOf(
+                                table1 to null,
+                                table2 to "INNER",
+                                table3 to "INNER"
+                            )
+                            // Also add variants with different join types
+                            combinationJoinTypes["$baseKey:LEFT_INNER"] = listOf(
+                                table1 to null,
+                                table2 to "LEFT",
+                                table3 to "INNER"
+                            )
+                            combinationJoinTypes["$baseKey:INNER_LEFT"] = listOf(
+                                table1 to null,
+                                table2 to "INNER",
+                                table3 to "LEFT"
+                            )
+
+                            logger.info("  Added transitive relationship: ${threeTableCombo.joinToString(" → ")}")
+                        }
+                    }
+                }
+            }
+
+            logger.lifecycle("Kodama Phase 2: Total combinations after relationship-based generation: ${queryCombinations.size}")
+        } else {
+            logger.lifecycle("Kodama Phase 2: No relationships.json found - generating from single tables only")
+        }
 
         // ==============================================
         // NEW: Use refactored generator system
@@ -1348,11 +1440,15 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
         logger.lifecycle("Kodama Phase 2: After transformation:")
         logger.lifecycle("  - Query combinations (with auto-generated Table+Subquery): ${transformedData.queryCombinations.size}")
 
+        // relationshipMetadata already loaded above (line 1262)
+
         // Create all generators
         val generatorFactory = com.obabichev.kodama.compiler.generator.GeneratorFactory(
             data = transformedData,
             schemaPackage = schemaPkg,
-            generatedPackage = genPkg
+            generatedPackage = genPkg,
+            relationshipMetadata = relationshipMetadata,
+            maxTableCount = maxTableCount.get()
         )
         val allGenerators = generatorFactory.createAllGenerators()
 

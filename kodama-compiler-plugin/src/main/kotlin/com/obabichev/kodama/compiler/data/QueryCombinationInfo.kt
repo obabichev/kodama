@@ -1,7 +1,5 @@
 package com.obabichev.kodama.compiler.data
 
-import com.obabichev.kodama.compiler.SelectionPattern
-
 /**
  * Represents a discovered query combination (tables joined together).
  *
@@ -41,11 +39,6 @@ data class QueryCombinationInfo(
      */
     val joinedTables: List<JoinedTableInfo> = emptyList(),
 
-    /**
-     * Selection patterns discovered for this combination.
-     * Each pattern represents a different set of selected columns/aggregates.
-     */
-    val selectionPatterns: List<SelectionPattern> = emptyList(),
 
     /**
      * True if this combination was synthesized for joinAliased support, not discovered in code.
@@ -62,50 +55,22 @@ data class QueryCombinationInfo(
         get() = listOf(baseTable) + joinedTables.map { it.table }
 
     /**
-     * Builder class name for this combination.
-     * Example: "AfterFromQueryBuilder_Person_Order"
+     * DELETED PROPERTIES (Legacy combinatorial API):
+     * The following properties were removed as they're only used by the old combinatorial explosion API
+     * which was replaced by phantom types. Kept as comment for reference.
+     *
+     * - builderClassName: "AfterFromQueryBuilder_Person_Order"
+     * - contextClassName: "SelectContext_Person_Order"
+     * - joinContextClassName: "JoinContext_Person_Order"
+     * - whereContextClassName: "WhereContext_Person_Order"
+     * - orderByContextClassName: "OrderByContext_Person_Order"
+     * - groupByContextClassName: "GroupByContext_Person_Order"
      */
-    val builderClassName: String
-        get() = "AfterFromQueryBuilder_" + tables.joinToString("_") { it.capitalizedName }
-
-    /**
-     * Select context class name.
-     * Example: "SelectContext_Person_Order"
-     */
-    val contextClassName: String
-        get() = "SelectContext_" + tables.joinToString("_") { it.capitalizedName }
-
-    /**
-     * Join context class name (includes all tables).
-     * Example: "JoinContext_Person_Order"
-     */
-    val joinContextClassName: String
-        get() = "JoinContext_" + tables.joinToString("_") { it.capitalizedName }
-
-    /**
-     * Where context class name.
-     * Example: "WhereContext_Person_Order"
-     */
-    val whereContextClassName: String
-        get() = "WhereContext_" + tables.joinToString("_") { it.capitalizedName }
-
-    /**
-     * OrderBy context class name.
-     * Example: "OrderByContext_Person_Order"
-     */
-    val orderByContextClassName: String
-        get() = "OrderByContext_" + tables.joinToString("_") { it.capitalizedName }
-
-    /**
-     * GroupBy context class name.
-     * Example: "GroupByContext_Person_Order"
-     */
-    val groupByContextClassName: String
-        get() = "GroupByContext_" + tables.joinToString("_") { it.capitalizedName }
 
     /**
      * Get table names as underscore-separated string.
      * Example: "Person_Order"
+     * NOTE: Still used for generating file names and combination keys.
      */
     val tableNamesSeparated: String
         get() = tables.joinToString("_") { it.capitalizedName }

@@ -54,10 +54,15 @@ abstract class DatabaseTest {
                         println("[$className] Ensuring tables exist: ${tables.joinToString(", ") { it.tableName }}")
                         try {
                             withStaticConnection {
+                                // Drop tables in reverse order (to handle dependencies)
+                                tables.reversed().forEach { table ->
+                                    val quotedTableName = if (table.tableName == "order") "\"${table.tableName}\"" else table.tableName
+                                    executeUpdate("DROP TABLE IF EXISTS $quotedTableName CASCADE")
+                                }
+                                // Create tables in forward order
                                 tables.forEach { table ->
                                     val sql = table.toCreateTableSQL()
                                     executeUpdate(sql)
-                                    // CREATE TABLE IF NOT EXISTS won't error if table exists
                                 }
                             }
                             initializedClasses.add(className)

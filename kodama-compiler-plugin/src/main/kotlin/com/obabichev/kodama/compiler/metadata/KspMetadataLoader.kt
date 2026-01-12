@@ -36,6 +36,25 @@ class KspMetadataLoader {
     }
 
     /**
+     * Load marker interface metadata from KSP-generated JSON file.
+     *
+     * @param metadataFile The kodama-ksp-metadata.json file
+     * @return List of marker metadata discovered by KSP
+     * @throws IllegalArgumentException if file doesn't exist or is invalid
+     */
+    fun loadMarkers(metadataFile: File): List<KspMarkerMetadata> {
+        require(metadataFile.exists()) {
+            "KSP metadata file not found: ${metadataFile.absolutePath}\n" +
+            "Make sure KSP has run successfully (check kspKotlin task)"
+        }
+
+        val jsonContent = metadataFile.readText()
+        val root = json.decodeFromString<KspMetadataRoot>(jsonContent)
+
+        return root.markers
+    }
+
+    /**
      * Find KSP metadata file in standard locations.
      *
      * Looks for: build/generated/ksp/main/resources/kodama-ksp-metadata.json

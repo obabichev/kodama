@@ -3,10 +3,12 @@ package com.obabichev.kodama.ksp
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.*
 import com.obabichev.kodama.ksp.model.KspTableModel
+import com.obabichev.kodama.ksp.model.MarkerInterfaceModel
+import com.obabichev.kodama.ksp.model.TableWithRelationships
 
 /**
  * Main KSP processor for Kodama.
- * Discovers Table object declarations and writes metadata to JSON file.
+ * Discovers Table object declarations, extracts relationships, and generates code.
  */
 class KodamaSymbolProcessor(
     private val codeGenerator: CodeGenerator,
@@ -15,6 +17,10 @@ class KodamaSymbolProcessor(
 ) : SymbolProcessor {
 
     private val discoveredTables = mutableListOf<KspTableModel>()
+    private val discoveredMarkers = mutableListOf<MarkerInterfaceModel>()
+    private val tablesWithRelationships = mutableListOf<TableWithRelationships>()
+    private val relationshipExtractor = RelationshipExtractor(logger)
+    private val canJoinGenerator = CanJoinGenerator(codeGenerator, logger)
     private lateinit var resolver: Resolver
 
     override fun process(resolver: Resolver): List<KSAnnotated> {
@@ -30,14 +36,36 @@ class KodamaSymbolProcessor(
                     val table = extractTableInfo(tableClass)
                     discoveredTables.add(table)
                     logger.info("Kodama KSP: Discovered table: ${table.qualifiedName}")
+
+                    // Also extract relationships from this table
+                    val relationships = relationshipExtractor.extractRelationships(tableClass)
+                    if (relationships.isNotEmpty()) {
+                        tablesWithRelationships.add(
+                            TableWithRelationships(table, relationships)
+                        )
+                        logger.info("Kodama KSP: Table ${table.name} has ${relationships.size} relationship(s)")
+                    }
                 }
         }
 
         logger.info("Kodama KSP: Found ${discoveredTables.size} table(s)")
+        logger.info("Kodama KSP: Found ${tablesWithRelationships.size} table(s) with relationships")
+
+        // Discover marker interfaces
+        discoverMarkerInterfaces(resolver)
+        logger.info("Kodama KSP: Found ${discoveredMarkers.size} marker interface(s)")
 
         // Write metadata to JSON file
-        if (discoveredTables.isNotEmpty()) {
+        if (discoveredTables.isNotEmpty() || discoveredMarkers.isNotEmpty()) {
             writeMetadataFile()
+        }
+
+        // Generate CanJoin instances
+        if (tablesWithRelationships.isNotEmpty()) {
+            val targetPackage = tablesWithRelationships.firstOrNull()?.table?.packageName
+                ?: "com.obabichev.kodama.generated"
+
+            canJoinGenerator.generateCanJoinInstances(tablesWithRelationships, targetPackage)
         }
 
         // No deferred symbols
@@ -82,6 +110,49 @@ class KodamaSymbolProcessor(
     }
 
     /**
+     * Discover marker interfaces in the codebase.
+     * A marker interface is either:
+     * 1. Annotated with @Marker
+     * 2. An empty interface (no properties, no functions)
+     */
+    private fun discoverMarkerInterfaces(resolver: Resolver) {
+        resolver.getAllFiles().forEach { file ->
+            file.declarations
+                .filterIsInstance<KSClassDeclaration>()
+                .filter { it.classKind == ClassKind.INTERFACE }
+                .forEach { interfaceDecl ->
+                    // Check if it has @Marker annotation
+                    val hasMarkerAnnotation = interfaceDecl.annotations.any { annotation ->
+                        val annotationType = annotation.annotationType.resolve()
+                        annotationType.declaration.qualifiedName?.asString() == "com.obabichev.kodama.annotations.Marker"
+                    }
+
+                    // Check if it's an empty interface
+                    val isEmpty = !interfaceDecl.declarations.any()
+
+                    // Include if it has @Marker or is empty
+                    if (hasMarkerAnnotation || isEmpty) {
+                        val name = interfaceDecl.simpleName.asString()
+                        val packageName = interfaceDecl.packageName.asString()
+                        val qualifiedName = interfaceDecl.qualifiedName?.asString() ?: "$packageName.$name"
+
+                        // Skip if it's a table (tables are interfaces but not markers)
+                        if (!discoveredTables.any { it.name == name }) {
+                            val marker = MarkerInterfaceModel(
+                                name = name,
+                                packageName = packageName,
+                                qualifiedName = qualifiedName,
+                                hasMarkerAnnotation = hasMarkerAnnotation
+                            )
+                            discoveredMarkers.add(marker)
+                            logger.info("Kodama KSP: Discovered marker: $name (annotated: $hasMarkerAnnotation, empty: $isEmpty)")
+                        }
+                    }
+                }
+        }
+    }
+
+    /**
      * Write discovered table metadata to JSON file.
      * Output: build/generated/ksp/main/resources/kodama-ksp-metadata.json
      */
@@ -111,11 +182,13 @@ class KodamaSymbolProcessor(
     }
 
     /**
-     * Generate JSON representation of discovered tables.
+     * Generate JSON representation of discovered tables and markers.
      */
     private fun generateJson(): String {
         return buildString {
             appendLine("{")
+
+            // Tables
             appendLine("  \"tables\": [")
             discoveredTables.forEachIndexed { index, table ->
                 append("    ")
@@ -126,7 +199,21 @@ class KodamaSymbolProcessor(
                     appendLine()
                 }
             }
+            appendLine("  ],")
+
+            // Markers
+            appendLine("  \"markers\": [")
+            discoveredMarkers.forEachIndexed { index, marker ->
+                append("    ")
+                append(marker.toJson().replace("\n", "\n    "))
+                if (index < discoveredMarkers.size - 1) {
+                    appendLine(",")
+                } else {
+                    appendLine()
+                }
+            }
             appendLine("  ]")
+
             append("}")
         }
     }

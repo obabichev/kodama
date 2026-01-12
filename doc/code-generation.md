@@ -889,4 +889,8 @@ kodama-compiler-plugin/src/main/kotlin/com/obabichev/kodama/compiler/KodamaTable
 6. **Generate markers** - Create marker interfaces and result classes
 7. **Output** - Write to `build/generated/kodama/`
 
-For detailed architecture documentation, see `CODE_GENERATION.md` at the project root.
+## See Also
+
+- **[Phantom Types Architecture](internal/phantom-types-design.md)** - Deep dive into per-position selection status and type-level guarantees
+- **[Getting Started](getting-started.md)** - User guide for writing queries
+- **[Entity Layer](entities.md)** - Interface-based entity definitions
