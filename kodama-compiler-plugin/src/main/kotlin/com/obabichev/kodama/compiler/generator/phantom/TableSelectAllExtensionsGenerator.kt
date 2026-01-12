@@ -58,26 +58,30 @@ class TableSelectAllExtensionsGenerator(
             appendLine("/**")
             appendLine(" * Select all columns from $tableName table.")
             appendLine(" * Only available when ${tableName}Marker is at position $position in the query.")
+            appendLine(" * Flips selection status at position $position from TableNotSelected to TableSelected.")
             appendLine(" */")
 
             // Add @JvmName to avoid signature clashes after type erasure
             appendLine("@JvmName(\"selectAll${tableName}AtPosition${position}Of$tableCount\")")
 
-            // Build type parameters
+            // Build type parameters: Other table types + all selection statuses + Sel
             val typeParams = buildList {
+                // Add other table type parameters (exclude the fixed position)
                 for (i in 1..tableCount) {
-                    if (i == position) {
-                        // This position is fixed to our table's marker
-                        // Don't add it to type parameters
-                    } else {
+                    if (i != position) {
                         add("T$i : $generatedPackage.TableMarker")
                     }
+                }
+                // Add all selection status parameters (all are generic in receiver)
+                for (i in 1..tableCount) {
+                    add("S$i : $generatedPackage.SelectionStatus")
                 }
                 add("Sel : $generatedPackage.SelectionSet")
             }.joinToString(", ")
 
-            // Build receiver type arguments
+            // Build receiver type arguments: Fixed table at position, others generic, all S generic
             val receiverTypeArgs = buildList {
+                // Table markers
                 for (i in 1..tableCount) {
                     if (i == position) {
                         add(markerType)
@@ -85,14 +89,39 @@ class TableSelectAllExtensionsGenerator(
                         add("T$i")
                     }
                 }
+                // Selection statuses (all generic in receiver)
+                for (i in 1..tableCount) {
+                    add("S$i")
+                }
+                add("Sel")
+            }.joinToString(", ")
+
+            // Build return type arguments: Same tables, but flip S{position} to Selected
+            val returnTypeArgs = buildList {
+                // Table markers (unchanged)
+                for (i in 1..tableCount) {
+                    if (i == position) {
+                        add(markerType)
+                    } else {
+                        add("T$i")
+                    }
+                }
+                // Selection statuses: Flip position to TableSelected, keep others generic
+                for (i in 1..tableCount) {
+                    if (i == position) {
+                        add("$generatedPackage.TableSelected")  // Flip to TableSelected!
+                    } else {
+                        add("S$i")  // Keep generic
+                    }
+                }
                 add("Sel")
             }.joinToString(", ")
 
             appendLine("inline fun <$typeParams> $generatedPackage.QueryBuilder_$tableCount<$receiverTypeArgs>.selectAll(")
             appendLine("    table: $schemaPackage.$tableName")
-            appendLine("): $generatedPackage.QueryBuilder_$tableCount<$receiverTypeArgs> {")
+            appendLine("): $generatedPackage.QueryBuilder_$tableCount<$returnTypeArgs> {")
             appendLine("    state.applySelection(com.obabichev.kodama.query.TableAllSelection(table, table.allColumns()))")
-            appendLine("    return this")
+            appendLine("    return $generatedPackage.QueryBuilder_$tableCount(state)")
             appendLine("}")
             appendLine()
         }

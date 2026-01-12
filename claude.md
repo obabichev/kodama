@@ -47,6 +47,14 @@ Kodama uses a **hybrid approach** for code generation:
    - Finds `fromAliased()` subquery definitions
    - Pattern-driven: Only generates code for table combinations actually used
 
+   **When to Use Regex in Kodama:**
+   - ✅ **Pattern Discovery**: Finding usage patterns in test files (appropriate)
+   - ✅ **Expression Analysis**: Parsing SQL-like expressions (pragmatic)
+   - ❌ **Structured Data**: Use proper parsers (JSON, XML) instead
+   - ❌ **Symbol Discovery**: Use KSP for types/interfaces instead
+   - ❌ **Case Conversion**: Use string algorithms instead
+   - See `REGEX_ELIMINATION_PLAN.md` for full guidelines
+
 **Key Files:**
 - KSP Processor: `kodama-ksp-processor/src/main/kotlin/com/obabichev/kodama/ksp/KodamaSymbolProcessor.kt`
 - Runtime Extractor: `kodama-compiler-plugin/src/main/kotlin/com/obabichev/kodama/compiler/metadata/RuntimeMetadataExtractor.kt`
@@ -573,6 +581,19 @@ Generated code is now placed in `{schemaPackage}.generated` instead of hardcoded
   - ✅ Entity Layer with interface-based entities
   - ✅ One-to-many and many-to-one relationships
   - ✅ Modular code generation architecture (80+ generators)
+- **Code Quality Improvements** (January 2026):
+  - ✅ **Regex Elimination**: Reduced regex usage from 43 to ~35 patterns (-19%)
+  - ✅ **JSON Parsing**: Replaced regex with `kotlinx.serialization` (type-safe)
+  - ✅ **Case Conversion**: Created `StringUtils` with `toSnakeCase()`, `toCamelCase()`, `toPascalCase()` (~3× faster than regex)
+  - ✅ **Marker Discovery**: KSP-first approach with `@Marker` annotation (compiler-aware)
+  - ✅ **Comprehensive Tests**: Added `StringUtilsTest` with 20+ test cases
+  - See `CONTRIBUTING.md` for regex usage guidelines
+- **Type Safety Improvements** (January 2026):
+  - ✅ **Per-Position Selection Status**: Compile-time enforcement that only selected tables are accessible in results
+  - ✅ **Phantom Types Architecture**: Type system tracks each table's selection status independently (S1, S2, S3, ...)
+  - ✅ **Zero Overhead**: O(N) code generation (not O(2^N)) - no combinatorial explosion
+  - ✅ **Clear Error Messages**: Compiler guides you when accessing non-selected tables
+  - See `doc/internal/phantom-types-design.md` for architecture details
 - **Known Limitations**:
   - Multi-table query result accessors use nullable types for all tables (conservative but safe)
   - This handles all join types correctly (INNER/LEFT/RIGHT/FULL)

@@ -34,9 +34,29 @@ abstract class KodamaExtension(project: Project) {
      */
     abstract val generatedPackage: Property<String>
 
+    /**
+     * Maximum number of tables supported in a single query.
+     *
+     * Determines how many QueryBuilder_N classes are generated (QueryBuilder_1 through QueryBuilder_N).
+     * Higher values allow more complex queries but increase generated code size.
+     *
+     * Default: 5 (covers 99.99% of real-world queries)
+     * Typical usage: 1-3 tables in most queries
+     * Recommended max: 10 (each additional N adds ~1,000 lines of generated code)
+     *
+     * Example: Set to 7 for queries joining up to 7 tables
+     * ```kotlin
+     * kodama {
+     *     maxTableCount.set(7)
+     * }
+     * ```
+     */
+    abstract val maxTableCount: Property<Int>
+
     init {
         // Defaults will be set after auto-detection in the plugin
         schemaPackage.convention("")
         generatedPackage.convention("")
+        maxTableCount.convention(5)
     }
 }

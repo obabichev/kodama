@@ -1,5 +1,7 @@
 package com.obabichev.kodama.compiler.data
 
+import com.obabichev.kodama.compiler.util.toSnakeCase
+
 /**
  * SQL alias naming style for markers.
  * Determines how property names are converted to SQL column aliases.
@@ -87,6 +89,6 @@ data class MarkerInfo(
     val sqlAlias: String
         get() = when (sqlAliasStyle) {
             SqlAliasStyle.CAMEL_CASE -> propertyName
-            SqlAliasStyle.SNAKE_CASE -> propertyName.replace(Regex("([a-z])([A-Z])"), "$1_$2").lowercase()
+            SqlAliasStyle.SNAKE_CASE -> propertyName.toSnakeCase()
         }
 }

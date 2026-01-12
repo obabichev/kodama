@@ -3,6 +3,9 @@ package com.obabichev.kodama.compiler
 import com.obabichev.kodama.compiler.metadata.KspMetadataLoader
 import com.obabichev.kodama.compiler.metadata.RuntimeMetadataExtractor
 import com.obabichev.kodama.compiler.metadata.TableMetadata
+import com.obabichev.kodama.compiler.util.toSnakeCase
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
@@ -39,6 +42,22 @@ internal data class SelectionMarkerInfo(
     val packageName: String,
     val resultType: String = "Number",
     val sqlAliasStyle: String = "SNAKE_CASE"  // Default to snake_case for backwards compatibility
+)
+
+/**
+ * JSON data classes for parsing relationships.json.
+ * Used by kotlinx.serialization to deserialize the relationships file.
+ */
+@Serializable
+internal data class RelationshipJson(
+    val from: String,
+    val to: String
+)
+
+@Serializable
+internal data class RelationshipsFileJson(
+    val `package`: String,
+    val relationships: List<RelationshipJson>
 )
 
 /**
@@ -119,6 +138,9 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
 
     @get:Input
     abstract val generatedPackage: Property<String>
+
+    @get:Input
+    abstract val maxTableCount: Property<Int>
 
     @get:OutputDirectory
     abstract val outputDirectory: DirectoryProperty
@@ -211,15 +233,13 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
         try {
             val jsonContent = relationshipsFile.readText()
 
-            // Simple JSON parsing (avoiding external dependencies)
-            val relationships = mutableSetOf<Pair<String, String>>()
+            // Parse JSON using kotlinx.serialization (type-safe, no regex!)
+            val json = Json { ignoreUnknownKeys = true }
+            val data = json.decodeFromString<RelationshipsFileJson>(jsonContent)
 
-            // Extract relationship pairs using regex
-            val relationshipPattern = """"from":\s*"([^"]+)"[^}]*"to":\s*"([^"]+)"""".toRegex()
-            relationshipPattern.findAll(jsonContent).forEach { match ->
-                val from = match.groupValues[1]
-                val to = match.groupValues[2]
-                relationships.add(from to to)
+            val relationships = data.relationships.map { it.from to it.to }.toSet()
+
+            relationships.forEach { (from, to) ->
                 logger.info("Kodama: Found relationship: $from -> $to")
             }
 
@@ -406,6 +426,13 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
         testKtFiles.forEach { file ->
             val content = file.readText()
 
+            // === REGEX USAGE: Pattern Discovery ===
+            // The following regex patterns are used for PATTERN DISCOVERY, which is an appropriate use case.
+            // We're mining test files to find usage patterns (from/join/select combinations).
+            // Alternative: Full Kotlin AST parsing would be overkill and slower for this purpose.
+            // These patterns don't parse structured data - they discover usage patterns.
+            // See REGEX_ELIMINATION_PLAN.md for guidelines on when regex is appropriate.
+
             // Find all query chains with their markers
             // Pattern: from(Table1).join(Table2)....selectAliased(Marker) { ... }
             val queryWithMarkerPattern = """from\s*\(\s*([A-Z]\w+)\s*\)((?:\s*\.(?:join|leftJoin|joinAliased|leftJoinAliased)\s*\([^)]*\)(?:\s*\{[^}]*\})?)*)((?:\s*\.select(?:All|Aliased)?[^.]*)*)\s*\.selectAliased\s*\(\s*([A-Z]\w+)\s*\)""".toRegex()
@@ -533,9 +560,7 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
             val (subqueryBody, _) = matches.minByOrNull { it.first.length } ?: return@forEach
 
             // Convert PascalCase to snake_case for SQL alias
-            val sqlAlias = subqueryName
-                .replace(Regex("([a-z])([A-Z])"), "$1_$2")
-                .lowercase()
+            val sqlAlias = subqueryName.toSnakeCase()
 
             // Extract columns from the subquery
             val columns = mutableListOf<SubqueryColumnInfo>()
@@ -570,7 +595,7 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
                 val propertyName = markerName.replaceFirstChar { it.lowercase() }
                 // Always use snake_case for SQL column names (matches TypedQueryBuilder behavior)
                 // MyAlias -> myAlias -> my_alias
-                val sqlAlias = propertyName.replace(Regex("([a-z])([A-Z])"), "$1_$2").lowercase()
+                val sqlAlias = propertyName.toSnakeCase()
 
                 // Try to extract source column from aggregate expression like "sum(order.cost)"
                 val aggregateColumnPattern = """(sum|count|avg|min|max)\s*\(\s*(\w+)\.(\w+)\s*\)""".toRegex()
@@ -705,24 +730,62 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
             return interfaceName.replaceFirstChar { it.lowercase() }
         }
 
-        // Scan both test files and schema files for marker interfaces
+        // Load markers from KSP metadata (primary source)
+        val metadataLoader = KspMetadataLoader()
+        val kspMetadataPath = kspMetadataFile.get().asFile
+
+        if (kspMetadataPath.exists()) {
+            try {
+                val kspMarkers = metadataLoader.loadMarkers(kspMetadataPath)
+                kspMarkers.forEach { marker ->
+                    val propertyName = interfaceNameToPropertyName(marker.name)
+                    // Avoid conflicts with table names
+                    if (!tables.contains(marker.name)) {
+                        val type = markerTypes[marker.name] ?: "Number"
+                        val aliasStyle = markerAliasStyles[marker.name] ?: "SNAKE_CASE"
+                        selectionMarkers.add(
+                            SelectionMarkerInfo(
+                                marker.name,
+                                propertyName,
+                                marker.packageName,
+                                type,
+                                aliasStyle
+                            )
+                        )
+                    }
+                }
+                logger.info("Kodama: Loaded ${kspMarkers.size} marker(s) from KSP metadata")
+            } catch (e: Exception) {
+                logger.warn("Kodama: Failed to load markers from KSP metadata: ${e.message}")
+            }
+        }
+
+        // === REGEX USAGE: Fallback for Test Sources ===
+        // Fallback: Regex-based discovery for test sources (KSP might not process test code)
+        // This ensures backward compatibility and handles markers defined in test files
+        // Justified because:
+        // 1. KSP may not process test sources depending on configuration
+        // 2. Provides backward compatibility for projects without @Marker annotation
+        // 3. Pattern discovery (finding interface declarations) is an appropriate use of regex
         val allSourceFiles = (schemaKtFiles.toList() + testKtFiles.toList()).asSequence()
         allSourceFiles.forEach { file ->
             val content = file.readText()
 
-            // Extract package name from file
+            // Extract package name from file (lightweight, no need for full parsing)
             val packagePattern = """package\s+([\w.]+)""".toRegex()
             val packageName = packagePattern.find(content)?.groupValues?.get(1) ?: genPkg
 
             // Match empty interfaces: interface XxxYyy with no body or empty body
-            // This regex matches:
-            // - interface Name
-            // - interface Name { }
-            // - interface Name : SuperInterface
-            // But NOT interfaces with members
+            // This regex discovers interface declarations - pattern discovery use case
             val markerPattern = """(?:^|\n)\s*interface\s+([A-Z]\w+)(?:\s*:\s*[\w.]+)?(?:\s*\{\s*\}|\s*(?=\n|$))""".toRegex()
             markerPattern.findAll(content).forEach { match ->
                 val interfaceName = match.groupValues[1]
+
+                // Skip if already discovered by KSP
+                if (selectionMarkers.any { it.interfaceName == interfaceName }) {
+                    return@forEach
+                }
+
                 val propertyName = interfaceNameToPropertyName(interfaceName)
 
                 // Avoid conflicts with table names
@@ -818,7 +881,7 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
             newSubqueryMarkers.forEach { markerName ->
                 val newSubquery = SubqueryInfo(
                     markerName,
-                    markerName.replace(Regex("([a-z])([A-Z])"), "$1_$2").lowercase(),
+                    markerName.toSnakeCase(),
                     template.columns,
                     template.sourceTables
                 )
@@ -1384,7 +1447,8 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
             data = transformedData,
             schemaPackage = schemaPkg,
             generatedPackage = genPkg,
-            relationshipMetadata = relationshipMetadata
+            relationshipMetadata = relationshipMetadata,
+            maxTableCount = maxTableCount.get()
         )
         val allGenerators = generatorFactory.createAllGenerators()
 

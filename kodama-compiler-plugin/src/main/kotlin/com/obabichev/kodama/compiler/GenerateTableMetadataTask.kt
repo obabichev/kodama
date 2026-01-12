@@ -331,9 +331,11 @@ abstract class GenerateTableMetadataTask : DefaultTask() {
         tables.forEach { table ->
             appendLine("/**")
             appendLine(" * Create a query starting from ${table.name} table using phantom types.")
-            appendLine(" * Returns QueryBuilder_1<${table.name}Marker, NoSelections> for type-safe single-table queries.")
+            appendLine(" * Returns QueryBuilder_1<${table.name}Marker, TableNotSelected, NoSelections>.")
+            appendLine(" * TableNotSelected indicates the table has not been selected yet (use .selectAll() to select).")
+            appendLine(" * NoSelections indicates no marker selections yet (use .selectAs() for aggregates).")
             appendLine(" */")
-            appendLine("fun from(table: $schemaPkg.${table.name}): $genPkg.QueryBuilder_1<$genPkg.${table.name}Marker, $genPkg.NoSelections> {")
+            appendLine("fun from(table: $schemaPkg.${table.name}): $genPkg.QueryBuilder_1<$genPkg.${table.name}Marker, $genPkg.TableNotSelected, $genPkg.NoSelections> {")
             appendLine("    val state = QueryState()")
             appendLine("    state._from = state.relations.relation(table)")
             appendLine("    return $genPkg.QueryBuilder_1(state)")

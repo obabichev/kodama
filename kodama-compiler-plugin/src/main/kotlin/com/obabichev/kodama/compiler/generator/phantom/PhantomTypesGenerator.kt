@@ -1,6 +1,7 @@
 package com.obabichev.kodama.compiler.generator.phantom
 
 import com.obabichev.kodama.compiler.generator.CodeGenerator
+import com.obabichev.kodama.compiler.util.toSnakeCase
 
 /**
  * Generates table marker types for phantom type-based query builders.
@@ -85,7 +86,7 @@ class SelectionSetTypesGenerator(
         appendLine(" */")
         appendLine()
 
-        // Base sealed interface
+        // Base sealed interface for marker selections
         appendLine("sealed interface SelectionSet")
         appendLine()
 
@@ -102,6 +103,27 @@ class SelectionSetTypesGenerator(
         appendLine(" * Forms a type-level linked list of selected markers.")
         appendLine(" */")
         appendLine("interface Selected<Marker, Rest : SelectionSet> : SelectionSet")
+        appendLine()
+
+        // Per-position selection status for tables
+        appendLine("/**")
+        appendLine(" * Selection status - tracks whether a table at a specific position has been selected.")
+        appendLine(" * Each table position (T1, T2, T3, etc.) has its own selection status (S1, S2, S3, etc.).")
+        appendLine(" * This enables direct compile-time checking: row.table requires S_N : TableSelected")
+        appendLine(" */")
+        appendLine("sealed interface SelectionStatus")
+        appendLine()
+
+        appendLine("/**")
+        appendLine(" * TableSelected status - table at this position has been selected with .selectAll().")
+        appendLine(" */")
+        appendLine("interface TableSelected : SelectionStatus")
+        appendLine()
+
+        appendLine("/**")
+        appendLine(" * TableNotSelected status - table at this position has NOT been selected yet.")
+        appendLine(" */")
+        appendLine("interface TableNotSelected : SelectionStatus")
         appendLine()
     }
 
@@ -132,20 +154,22 @@ class MarkerAccessorExtensionGenerator(
         val accessorName = markerInfo.propertyName
         val markerType = markerInfo.resultType
 
-        // Build type parameters: T1, T2, ..., TN, Sel (selection set is generic)
+        // Build type parameters: T1, T2, ..., TN, S1, S2, ..., SN, Sel
         val tableTypeParams = (1..tableCount).joinToString(", ") { "T$it : TableMarker" }
+        val selectionStatusParams = (1..tableCount).joinToString(", ") { "S$it : SelectionStatus" }
         val allTypeParams = if (tableTypeParams.isNotEmpty()) {
-            "$tableTypeParams, Sel : SelectionSet"
+            "$tableTypeParams, $selectionStatusParams, Sel : SelectionSet"
         } else {
-            "Sel : SelectionSet"
+            "$selectionStatusParams, Sel : SelectionSet"
         }
 
-        // Build type arguments for QueryResult: T1, T2, ..., TN, Sel
+        // Build type arguments for QueryResult: T1, T2, ..., TN, S1, S2, ..., SN, Sel
         val tableTypeArgs = (1..tableCount).joinToString(", ") { "T$it" }
+        val selectionStatusArgs = (1..tableCount).joinToString(", ") { "S$it" }
         val allTypeArgs = if (tableTypeArgs.isNotEmpty()) {
-            "$tableTypeArgs, Sel"
+            "$tableTypeArgs, $selectionStatusArgs, Sel"
         } else {
-            "Sel"
+            "$selectionStatusArgs, Sel"
         }
 
         appendLine("/**")
@@ -177,16 +201,19 @@ class QueryBuilderNGenerator(
     private val schemaPackage: String
 ) : CodeGenerator {
 
-    private val typeParams = (1..tableCount).joinToString(", ") { "T$it : TableMarker" } + ", Sel : SelectionSet"
-    private val typeArgs = (1..tableCount).joinToString(", ") { "T$it" } + ", Sel"
+    private val typeParams = (1..tableCount).joinToString(", ") { "T$it : TableMarker" } + ", " +
+            (1..tableCount).joinToString(", ") { "S$it : SelectionStatus" } + ", Sel : SelectionSet"
+    private val typeArgs = (1..tableCount).joinToString(", ") { "T$it" } + ", " +
+            (1..tableCount).joinToString(", ") { "S$it" } + ", Sel"
 
     override fun generate(): String = buildString {
         appendLine("/**")
         appendLine(" * Query builder for $tableCount-table queries using phantom types.")
         appendLine(" * Type parameters T1..T$tableCount encode which specific tables are joined.")
+        appendLine(" * Type parameters S1..S$tableCount encode each table's selection status (TableNotSelected initially, TableSelected after .selectAll()).")
         appendLine(" * Type parameter Sel encodes which markers have been selected (NoSelections initially).")
         appendLine(" *")
-        appendLine(" * Example: QueryBuilder_$tableCount<PersonMarker, OrderMarker${if (tableCount > 2) ", CompanyMarker" else ""}, NoSelections>")
+        appendLine(" * Example: QueryBuilder_$tableCount<PersonMarker, OrderMarker${if (tableCount > 2) ", CompanyMarker" else ""}, TableNotSelected, TableNotSelected${if (tableCount > 2) ", TableNotSelected" else ""}, NoSelections>")
         appendLine(" */")
         appendLine("class QueryBuilder_$tableCount<$typeParams>(")
         appendLine("    val state: QueryState")
@@ -242,10 +269,13 @@ class QueryBuilderNGenerator(
         appendLine("     * .selectAs(TotalRevenue) { sum(order.cost) }")
         appendLine("     * ```")
         appendLine("     */")
+        val selectionStatusArgs = (1..tableCount).joinToString(", ") { "S$it" }
+        val returnTypeArgs = "$tableTypeArgs, $selectionStatusArgs, Selected<Marker, Sel>"
+
         appendLine("    inline fun <reified Marker> selectAs(")
         appendLine("        marker: Marker,")
         appendLine("        noinline selector: SelectContext_$tableCount<$tableTypeArgs>.() -> Expression")
-        appendLine("    ): QueryBuilder_$tableCount<$tableTypeArgs, Selected<Marker, Sel>> {")
+        appendLine("    ): QueryBuilder_$tableCount<$returnTypeArgs> {")
         appendLine("        val context = SelectContext_$tableCount<$tableTypeArgs>(state)")
         appendLine("        val expression = context.selector()")
         appendLine("        state.addMarkerSelection(Marker::class, expression)")
@@ -427,12 +457,15 @@ class QueryResultIterableNGenerator(
     private val generatedPackage: String
 ) : CodeGenerator {
 
-    private val typeParams = (1..tableCount).joinToString(", ") { "T$it : TableMarker" } + ", Sel : SelectionSet"
-    private val typeArgs = (1..tableCount).joinToString(", ") { "T$it" } + ", Sel"
+    private val typeParams = (1..tableCount).joinToString(", ") { "T$it : TableMarker" } + ", " +
+            (1..tableCount).joinToString(", ") { "S$it : SelectionStatus" } + ", Sel : SelectionSet"
+    private val typeArgs = (1..tableCount).joinToString(", ") { "T$it" } + ", " +
+            (1..tableCount).joinToString(", ") { "S$it" } + ", Sel"
 
     override fun generate(): String = buildString {
         appendLine("/**")
         appendLine(" * Result iterable for $tableCount-table queries.")
+        appendLine(" * S1..S$tableCount parameters track which tables have been selected (per-position status).")
         appendLine(" * Sel parameter tracks which markers have been selected.")
         appendLine(" */")
         appendLine("class QueryResultIterable_$tableCount<$typeParams>(")
@@ -452,6 +485,7 @@ class QueryResultIterableNGenerator(
         appendLine("/**")
         appendLine(" * Result row for $tableCount-table queries.")
         appendLine(" * Table accessors are provided via extension functions based on phantom types.")
+        appendLine(" * Table accessors require that the table was selected (constrained by S1..S$tableCount : TableSelected).")
         appendLine(" * Marker accessors (e.g., row.totalRevenue) are provided for selected markers in Sel.")
         appendLine(" */")
         appendLine("class QueryResult_$tableCount<$typeParams>(")
@@ -561,12 +595,13 @@ class PhantomJoinExtensionGenerator(
             appendLine("/**")
             appendLine(" * ${joinType.replaceFirstChar { it.uppercase() }} JOIN $toTable table to a query starting from $fromTable.")
             appendLine(" * This join is validated at compile-time via relationship declaration.")
+            appendLine(" * Preserves selection status S1 from first table, adds TableNotSelected for joined table.")
             appendLine(" */")
             appendLine("@JvmName(\"${methodName}_${fromTable}_to_${toTable}\")")
-            appendLine("fun <Sel : SelectionSet> $generatedPackage.QueryBuilder_1<$generatedPackage.${fromTable}Marker, Sel>.$methodName(")
+            appendLine("fun <S1 : SelectionStatus, Sel : SelectionSet> $generatedPackage.QueryBuilder_1<$generatedPackage.${fromTable}Marker, S1, Sel>.$methodName(")
             appendLine("    table: $schemaPackage.$toTable,")
             appendLine("    condition: $generatedPackage.JoinContext_${fromTable}_$toTable.() -> com.obabichev.kodama.components.expression.Expression")
-            appendLine("): $generatedPackage.QueryBuilder_2<$generatedPackage.${fromTable}Marker, $generatedPackage.${toTable}Marker, Sel> {")
+            appendLine("): $generatedPackage.QueryBuilder_2<$generatedPackage.${fromTable}Marker, $generatedPackage.${toTable}Marker, S1, TableNotSelected, Sel> {")
             appendLine("    val context = $generatedPackage.JoinContext_${fromTable}_$toTable(state, table)")
             appendLine("    val joinCondition = context.condition()")
             appendLine("    state._joins.add(com.obabichev.kodama.components.Join(")
@@ -672,21 +707,32 @@ class PhantomMultiTableJoinExtensionGenerator(
     private val nextTableCount = currentTableCount + 1
 
     override fun generate(): String = buildString {
-        // Build type parameters: T1, T2, ..., TN (excluding the position where fromTable is) + Sel
-        val otherTypeParams = (1..currentTableCount)
+        // Build type parameters: T1, T2, ..., TN (excluding the position where fromTable is) + S1...SN + Sel
+        val otherTableParams = (1..currentTableCount)
             .filter { it != fromPosition }
-            .joinToString(", ") { "T$it : TableMarker" } + ", Sel : SelectionSet"
+            .joinToString(", ") { "T$it : TableMarker" }
+        val selectionStatusParams = (1..currentTableCount)
+            .joinToString(", ") { "S$it : SelectionStatus" }
+        val otherTypeParams = if (otherTableParams.isNotEmpty()) {
+            "$otherTableParams, $selectionStatusParams, Sel : SelectionSet"
+        } else {
+            "$selectionStatusParams, Sel : SelectionSet"
+        }
 
         // Build full type arguments for QueryBuilder_N, with fromTable at fromPosition
-        val currentTypeArgs = (1..currentTableCount).map { i ->
+        val currentTableTypeArgs = (1..currentTableCount).map { i ->
             if (i == fromPosition) "${fromTable}Marker" else "T$i"
-        }.joinToString(", ") + ", Sel"
+        }.joinToString(", ")
+        val currentSelectionStatusArgs = (1..currentTableCount).joinToString(", ") { "S$it" }
+        val currentTypeArgs = "$currentTableTypeArgs, $currentSelectionStatusArgs, Sel"
 
-        // Build type arguments for QueryBuilder_{N+1} (all current + toTable)
-        val nextTypeArgs = currentTypeArgs.replace(", Sel", "") + ", ${toTable}Marker, Sel"
+        // Build type arguments for QueryBuilder_{N+1} (all current tables + toTable, all current S + TableNotSelected)
+        val nextTableTypeArgs = "$currentTableTypeArgs, ${toTable}Marker"
+        val nextSelectionStatusArgs = "$currentSelectionStatusArgs, TableNotSelected"  // New table starts as TableNotSelected
+        val nextTypeArgs = "$nextTableTypeArgs, $nextSelectionStatusArgs, Sel"
 
-        // Build type arguments for MultiTableJoinContext_{N+1} (table types only, no Sel)
-        val nextContextTypeArgs = currentTypeArgs.replace(", Sel", "") + ", ${toTable}Marker"
+        // Build type arguments for MultiTableJoinContext_{N+1} (table types only, no selection statuses/Sel)
+        val nextContextTypeArgs = nextTableTypeArgs
 
         // Build type parameter list for the function
         val funcTypeParams = "<$otherTypeParams>"
@@ -854,23 +900,40 @@ class TableResultExtensionsGenerator(
 
         // Generate extension for each type parameter position
         for (position in 1..tableCount) {
-            val otherParams = (1..tableCount).filter { it != position }
+            // Build other table type parameters (exclude fixed position)
+            val otherTableParams = (1..tableCount).filter { it != position }
                 .joinToString(", ") { "T$it : TableMarker" }
+
+            // Build all selection status parameters
+            val selectionStatusParams = (1..tableCount)
+                .joinToString(", ") { "S$it : SelectionStatus" }
+
+            // Build table type arguments for QueryResult
             val tableTypeArgs = (1..tableCount).map { i ->
                 if (i == position) "${tableName}Marker" else "T$i"
             }.joinToString(", ")
 
-            // Add Sel parameter to match QueryResult_N signature
-            val fullTypeArgs = "$tableTypeArgs, Sel"
-            val paramsList = if (otherParams.isNotEmpty()) {
-                "<$otherParams, Sel : SelectionSet>"
+            // Build selection status arguments
+            val selectionStatusArgs = (1..tableCount).joinToString(", ") { "S$it" }
+
+            // Full type arguments for QueryResult_N
+            val fullTypeArgs = "$tableTypeArgs, $selectionStatusArgs, Sel"
+
+            // Build type parameters list
+            val paramsList = if (otherTableParams.isNotEmpty()) {
+                "<$otherTableParams, $selectionStatusParams, Sel : SelectionSet>"
             } else {
-                "<Sel : SelectionSet>"
+                "<$selectionStatusParams, Sel : SelectionSet>"
             }
+
+            // Build where clause - constrain this position's selection status to TableSelected
+            val whereClause = "where S$position : TableSelected"
 
             val accessorName = tableName.replaceFirstChar { it.lowercase() }
             appendLine("/**")
             appendLine(" * Access $tableName results when it's in position $position.")
+            appendLine(" * Only available when $tableName has been selected via .selectAll($tableName).")
+            appendLine(" * Requires S$position : TableSelected (compile-time enforced).")
             if (tableCount == 1) {
                 appendLine(" * Single-table query - properties are non-nullable.")
             } else {
@@ -888,12 +951,14 @@ class TableResultExtensionsGenerator(
             if (tableCount == 1) {
                 // Single-table query - always non-nullable
                 appendLine("inline val $paramsList QueryResult_$tableCount<$fullTypeArgs>.$accessorName: ${tableName}ResultAccessor_All_NonNull")
+                appendLine("    $whereClause")
                 appendLine("    @JvmName(\"get_${accessorName}_T${tableCount}_P${position}\")")
                 appendLine("    get() = ${tableName}ResultAccessor_All_NonNull(resultSet, state.relations, state._selectedColumns)")
             } else {
                 // Multi-table query - always use nullable accessor for safety
                 // This correctly handles LEFT/RIGHT/FULL joins and is safe (albeit conservative) for INNER joins
                 appendLine("inline val $paramsList QueryResult_$tableCount<$fullTypeArgs>.$accessorName: ${tableName}ResultAccessor_All_Nullable")
+                appendLine("    $whereClause")
                 appendLine("    @JvmName(\"get_${accessorName}_T${tableCount}_P${position}\")")
                 appendLine("    get() = ${tableName}ResultAccessor_All_Nullable(resultSet, state.relations, state._selectedColumns)")
             }
@@ -1170,10 +1235,7 @@ class SubqueryContextExtensionsGenerator(
 
     override fun generate(): String = buildString {
         val subqueryName = subqueryInfo.name
-        val subqueryAlias = subqueryInfo.name
-            .replaceFirstChar { it.lowercase() }
-            .replace(Regex("([a-z])([A-Z])"), "$1_$2")
-            .lowercase()
+        val subqueryAlias = subqueryInfo.name.toSnakeCase()
         val accessorName = subqueryInfo.name.replaceFirstChar { it.lowercase() }
         val accessorClassName = "${subqueryInfo.name}Accessor"
 
@@ -1226,10 +1288,7 @@ class SubqueryWhereExtensionsGenerator(
 
     override fun generate(): String = buildString {
         val subqueryName = subqueryInfo.name
-        val subqueryAlias = subqueryInfo.name
-            .replaceFirstChar { it.lowercase() }
-            .replace(Regex("([a-z])([A-Z])"), "$1_$2")
-            .lowercase()
+        val subqueryAlias = subqueryInfo.name.toSnakeCase()
         val accessorName = subqueryInfo.name.replaceFirstChar { it.lowercase() }
         val accessorClassName = "${subqueryInfo.name}Accessor"
 
@@ -1282,10 +1341,7 @@ class SubqueryJoinExtensionsGenerator(
 
     override fun generate(): String = buildString {
         val subqueryName = subqueryInfo.name
-        val subqueryAlias = subqueryInfo.name
-            .replaceFirstChar { it.lowercase() }
-            .replace(Regex("([a-z])([A-Z])"), "$1_$2")
-            .lowercase()
+        val subqueryAlias = subqueryInfo.name.toSnakeCase()
         val accessorName = subqueryInfo.name.replaceFirstChar { it.lowercase() }
         val accessorClassName = "${subqueryInfo.name}Accessor"
 

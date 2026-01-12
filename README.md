@@ -10,7 +10,12 @@ overhead.
 
 ## ✨ Key Features
 
-- **🔒 Type Safety** - Catch all errors at compile time, not in production
+- **🔒 100% Compile-Time Type Safety**
+  - Catch all errors at compile time, not in production
+  - **Selection Enforcement**: Can only access tables in results that were explicitly selected
+  - Phantom types track query state: which tables are joined AND which are selected
+  - Invalid queries simply won't compile
+
 - **🚀 Zero Reflection** - Code generation for maximum performance
 - **💎 Fluent DSL** - Natural, readable query syntax
 - **🎯 PostgreSQL Optimized** - Designed specifically for PostgreSQL
@@ -18,6 +23,37 @@ overhead.
 - **✨ Nullable Types** - Full nullability support with `Column<T?>` for optional columns
 - **🗂️ Entity Layer** - Interface-based ORM with relationships and identity map
 - **🔗 Relationships** - Type-safe one-to-many and many-to-one navigation
+
+### Compile-Time Selection Enforcement
+
+Kodama ensures you can only access tables that were explicitly selected:
+
+```kotlin
+// ✅ This compiles - Order was selected
+from(Person)
+    .join(Order) { order.userName eq person.name }
+    .selectAll(Order)
+    .execute(tx)
+    .forEach { row ->
+        val product = row.order.product  // ✅ OK
+    }
+
+// ❌ This does NOT compile - Person was not selected
+from(Person)
+    .join(Order) { order.userName eq person.name }
+    .selectAll(Order)
+    .execute(tx)
+    .forEach { row ->
+        val name = row.person.name  // ❌ Compile error!
+        //         ^^^^^^^^^^
+        // ERROR: No extension function 'person' (S1 : TableNotSelected)
+    }
+```
+
+**How it works**: The type system tracks each table's selection status independently using phantom types:
+- `QueryBuilder_2<PersonMarker, OrderMarker, TableNotSelected, TableSelected, NoSelections>`
+- Result accessors require `where SN : TableSelected` constraint
+- Invalid access = compile error, not runtime exception
 
 ## Quick Start
 

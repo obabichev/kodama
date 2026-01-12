@@ -48,7 +48,7 @@ class EntitySessionTests : DatabaseTest() {
         withConnection {
             EntitySession(this.connection).use { session ->
                 // Find user using User.find() instead of session.find()
-                val user = session.find<User>( 1)
+                val user = session.find<User>(1)
 
                 // Verify
                 assertNotNull(user, "User should be found")
@@ -64,7 +64,7 @@ class EntitySessionTests : DatabaseTest() {
         withConnection {
             EntitySession(this.connection).use { session ->
                 // Try to find non-existent user
-                val user = session.find<User>( 999)
+                val user = session.find<User>(999)
 
                 // Verify
                 assertNull(user, "Non-existent user should return null")
@@ -88,11 +88,11 @@ class EntitySessionTests : DatabaseTest() {
         withConnection {
             EntitySession(this.connection).use { session ->
                 // Find user first time
-                val user1 = session.find<User>( 2)
+                val user1 = session.find<User>(2)
                 assertNotNull(user1)
 
                 // Find same user second time
-                val user2 = session.find<User>( 2)
+                val user2 = session.find<User>(2)
                 assertNotNull(user2)
 
                 // Verify same instance (identity map hit)

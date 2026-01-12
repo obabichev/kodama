@@ -103,6 +103,7 @@ class KodamaGradlePlugin : Plugin<Project> {
             generateQueryExtensionsTask.configure {
                 it.schemaPackage.set(detectedSchemaPackage)
                 it.generatedPackage.set(detectedGeneratedPackage)
+                it.maxTableCount.set(extension.maxTableCount.get())
                 it.kspMetadataFile.set(kspMetadataFile)
                 it.tableMetadataFile.set(tableMetadataFile)  // Depends on Phase 1 output
                 it.testFiles.setFrom(project.fileTree(testDir).matching { pattern ->
