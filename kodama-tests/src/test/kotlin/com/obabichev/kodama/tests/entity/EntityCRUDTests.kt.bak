@@ -1,0 +1,551 @@
+package com.obabichev.kodama.tests.entity
+
+import com.obabichev.kodama.entity.EntitySession
+import com.obabichev.kodama.tests.entity.User
+import com.obabichev.kodama.tests.entity.impl.User
+import com.obabichev.kodama.tests.entity.impl.copy
+import com.obabichev.kodama.tests.infrastructure.DatabaseTest
+import com.obabichev.kodama.tests.schema.Users
+import com.obabichev.kodama.tests.KodamaBindingRegistry
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
+
+/**
+ * Tests for Feature 5.4: Improved Entity CRUD API.
+ *
+ * Demonstrates the new simplified CRUD operations:
+ * - persist() - smart save (insert if new, update if exists)
+ * - insert() - explicit insert
+ * - update() - explicit update
+ * - remove() - immediate delete
+ * - Batch operations (persistAll, insertAll, updateAll, removeAll)
+ * - upsert() - PostgreSQL ON CONFLICT
+ */
+class EntityCRUDTests : DatabaseTest() {
+
+    companion object {
+        private val initRegistry = KodamaBindingRegistry
+    }
+
+    override fun requiredTables() = listOf(Users)
+
+    // ========================================
+    // Save Tests (Smart Save)
+    // ========================================
+
+    @Test
+    fun `save() - inserts new entity`() {
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                // Create new user
+                val user = User(id = 8000, name = "Alice", email = "alice@example.com")
+
+                // Save (should INSERT)
+                val savedUser = session.save(user)
+
+                assertEquals(8000, savedUser.id)
+                assertEquals("Alice", savedUser.name)
+                assertEquals("alice@example.com", savedUser.email)
+
+                // Verify in database
+                val loaded = session.find<User>(8000)
+                assertEquals("Alice", loaded?.name)
+            }
+        }
+    }
+
+    @Test
+    fun `save() - updates existing entity`() {
+        // Insert initial user
+        withConnection {
+            executeUpdate(
+                """
+                INSERT INTO users (id, name, email)
+                VALUES (8100, 'Bob', 'bob@example.com')
+                """.trimIndent()
+            )
+        }
+
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                // Load user
+                val user = session.find<User>(8100)!!
+
+                // Modify and save (should UPDATE)
+                val modified = user.copy(email = "bob.new@example.com")
+                val savedUser = session.save(modified)
+
+                assertEquals(8100, savedUser.id)
+                assertEquals("Bob", savedUser.name)
+                assertEquals("bob.new@example.com", savedUser.email)
+
+                // Verify in database
+                val reloaded = session.find<User>(8100)
+                assertEquals("bob.new@example.com", reloaded?.email)
+            }
+        }
+    }
+
+    @Test
+    fun `save() - handles multiple saves of same entity`() {
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                // First save - INSERT
+                val user1 = User(id = 8200, name = "Charlie", email = "charlie@example.com")
+                session.save(user1)
+
+                // Second save - UPDATE
+                val user2 = user1.copy(email = "charlie2@example.com")
+                session.save(user2)
+
+                // Third save - UPDATE
+                val user3 = user2.copy(email = "charlie3@example.com")
+                session.save(user3)
+
+                // Verify final state
+                val loaded = session.find<User>(8200)
+                assertEquals("charlie3@example.com", loaded?.email)
+            }
+        }
+    }
+
+    // ========================================
+    // Insert Tests
+    // ========================================
+
+    @Test
+    fun `insert() - inserts new entity`() {
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                val user = User(id = 8300, name = "Diana", email = "diana@example.com")
+
+                val inserted = session.insert(user)
+
+                assertEquals(8300, inserted.id)
+                assertEquals("Diana", inserted.name)
+
+                // Verify in database
+                val loaded = session.find<User>(8300)
+                assertEquals("Diana", loaded?.name)
+            }
+        }
+    }
+
+    @Test
+    fun `insert() - fails if entity already exists in session`() {
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                val user = User(id = 8400, name = "Eve", email = "eve@example.com")
+
+                // First insert succeeds
+                session.insert(user)
+
+                // Second insert fails
+                assertFailsWith<IllegalStateException> {
+                    session.insert(user)
+                }
+            }
+        }
+    }
+
+    // ========================================
+    // Update Tests
+    // ========================================
+
+    @Test
+    fun `update() - updates existing entity`() {
+        // Insert initial user
+        withConnection {
+            executeUpdate(
+                """
+                INSERT INTO users (id, name, email)
+                VALUES (8500, 'Frank', 'frank@example.com')
+                """.trimIndent()
+            )
+        }
+
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                // Load user
+                val user = session.find<User>(8500)!!
+
+                // Modify and update
+                val modified = user.copy(email = "frank.new@example.com")
+                val updated = session.update(modified)
+
+                assertEquals("frank.new@example.com", updated.email)
+
+                // Verify in database
+                val reloaded = session.find<User>(8500)
+                assertEquals("frank.new@example.com", reloaded?.email)
+            }
+        }
+    }
+
+    @Test
+    fun `update() - fails if entity not in session`() {
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                val user = User(id = 8600, name = "Grace", email = "grace@example.com")
+
+                // Update without loading first - should fail
+                assertFailsWith<IllegalStateException> {
+                    session.update(user)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `update() - only updates changed fields`() {
+        // Insert initial user
+        withConnection {
+            executeUpdate(
+                """
+                INSERT INTO users (id, name, email)
+                VALUES (8700, 'Henry', 'henry@example.com')
+                """.trimIndent()
+            )
+        }
+
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                // Load user
+                val user = session.find<User>(8700)!!
+
+                // Modify only email (name unchanged)
+                val modified = user.copy(email = "henry.new@example.com")
+                session.update(modified)
+
+                // Verify both fields are correct
+                val reloaded = session.find<User>(8700)
+                assertEquals("Henry", reloaded?.name)  // Unchanged
+                assertEquals("henry.new@example.com", reloaded?.email)  // Changed
+            }
+        }
+    }
+
+    // ========================================
+    // Remove Tests (Immediate Delete)
+    // ========================================
+
+    @Test
+    fun `remove() - deletes entity immediately`() {
+        // Insert user
+        withConnection {
+            executeUpdate(
+                """
+                INSERT INTO users (id, name, email)
+                VALUES (8800, 'Ivy', 'ivy@example.com')
+                """.trimIndent()
+            )
+        }
+
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                // Load and remove
+                val user = session.find<User>(8800)!!
+                session.remove(user)
+
+                // Verify deleted
+                val notFound = session.find<User>(8800)
+                assertNull(notFound)
+            }
+        }
+
+        // Verify deleted in database
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                val notFound = session.find<User>(8800)
+                assertNull(notFound)
+            }
+        }
+    }
+
+    // ========================================
+    // Batch Operation Tests
+    // ========================================
+
+    @Test
+    fun `saveAll() - saves multiple entities`() {
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                val users = listOf(
+                    User(id = 9000, name = "User1", email = "user1@example.com"),
+                    User(id = 9001, name = "User2", email = "user2@example.com"),
+                    User(id = 9002, name = "User3", email = "user3@example.com")
+                )
+
+                // Save all (should INSERT)
+                val saved = session.saveAll(users)
+
+                assertEquals(3, saved.size)
+
+                // Verify all in database
+                val user1 = session.find<User>(9000)
+                val user2 = session.find<User>(9001)
+                val user3 = session.find<User>(9002)
+
+                assertEquals("User1", user1?.name)
+                assertEquals("User2", user2?.name)
+                assertEquals("User3", user3?.name)
+            }
+        }
+    }
+
+    @Test
+    fun `insertAll() - inserts multiple entities`() {
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                val users = listOf(
+                    User(id = 9100, name = "BatchUser1", email = "batch1@example.com"),
+                    User(id = 9101, name = "BatchUser2", email = "batch2@example.com")
+                )
+
+                val inserted = session.insertAll(users)
+
+                assertEquals(2, inserted.size)
+
+                // Verify all in database
+                val user1 = session.find<User>(9100)
+                val user2 = session.find<User>(9101)
+
+                assertEquals("BatchUser1", user1?.name)
+                assertEquals("BatchUser2", user2?.name)
+            }
+        }
+    }
+
+    @Test
+    fun `updateAll() - updates multiple entities`() {
+        // Insert initial users
+        withConnection {
+            executeUpdate(
+                """
+                INSERT INTO users (id, name, email)
+                VALUES
+                    (9200, 'UpdateUser1', 'update1@example.com'),
+                    (9201, 'UpdateUser2', 'update2@example.com')
+                """.trimIndent()
+            )
+        }
+
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                // Load users
+                val user1 = session.find<User>(9200)!!
+                val user2 = session.find<User>(9201)!!
+
+                // Modify
+                val modified = listOf(
+                    user1.copy(email = "update1.new@example.com"),
+                    user2.copy(email = "update2.new@example.com")
+                )
+
+                // Update all
+                val updated = session.updateAll(modified)
+
+                assertEquals(2, updated.size)
+
+                // Verify in database
+                val reloaded1 = session.find<User>(9200)
+                val reloaded2 = session.find<User>(9201)
+
+                assertEquals("update1.new@example.com", reloaded1?.email)
+                assertEquals("update2.new@example.com", reloaded2?.email)
+            }
+        }
+    }
+
+    @Test
+    fun `removeAll() - deletes multiple entities`() {
+        // Insert users
+        withConnection {
+            executeUpdate(
+                """
+                INSERT INTO users (id, name, email)
+                VALUES
+                    (9300, 'DeleteUser1', 'delete1@example.com'),
+                    (9301, 'DeleteUser2', 'delete2@example.com'),
+                    (9302, 'DeleteUser3', 'delete3@example.com')
+                """.trimIndent()
+            )
+        }
+
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                // Load users
+                val users = listOf(
+                    session.find<User>(9300)!!,
+                    session.find<User>(9301)!!,
+                    session.find<User>(9302)!!
+                )
+
+                // Delete all
+                session.removeAll(users)
+
+                // Verify all deleted
+                assertNull(session.find<User>(9300))
+                assertNull(session.find<User>(9301))
+                assertNull(session.find<User>(9302))
+            }
+        }
+    }
+
+    // ========================================
+    // Upsert Tests (PostgreSQL ON CONFLICT)
+    // ========================================
+
+    @Test
+    fun `upsert() - inserts when entity doesn't exist`() {
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                val user = User(id = 9400, name = "UpsertNew", email = "upsertnew@example.com")
+
+                // Upsert (should INSERT)
+                val upserted = session.upsert(user, conflictColumns = listOf(Users.id))
+
+                assertEquals("UpsertNew", upserted.name)
+
+                // Verify in database
+                val loaded = session.find<User>(9400)
+                assertEquals("UpsertNew", loaded?.name)
+            }
+        }
+    }
+
+    @Test
+    fun `upsert() - updates when entity exists`() {
+        // Insert initial user
+        withConnection {
+            executeUpdate(
+                """
+                INSERT INTO users (id, name, email)
+                VALUES (9500, 'UpsertExisting', 'upsertold@example.com')
+                """.trimIndent()
+            )
+        }
+
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                val user = User(id = 9500, name = "UpsertUpdated", email = "upsertnew@example.com")
+
+                // Upsert (should UPDATE)
+                val upserted = session.upsert(user, conflictColumns = listOf(Users.id))
+
+                assertEquals("UpsertUpdated", upserted.name)
+
+                // Verify in database - should have updated values
+                val loaded = session.find<User>(9500)
+                assertEquals("UpsertUpdated", loaded?.name)
+                assertEquals("upsertnew@example.com", loaded?.email)
+            }
+        }
+    }
+
+    @Test
+    fun `upsertAll() - upserts multiple entities`() {
+        // Insert one existing user
+        withConnection {
+            executeUpdate(
+                """
+                INSERT INTO users (id, name, email)
+                VALUES (9600, 'ExistingUser', 'existing@example.com')
+                """.trimIndent()
+            )
+        }
+
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                val users = listOf(
+                    User(id = 9600, name = "UpdatedUser", email = "updated@example.com"),  // Should UPDATE
+                    User(id = 9601, name = "NewUser", email = "new@example.com")            // Should INSERT
+                )
+
+                // Upsert all
+                val upserted = session.upsertAll(users, conflictColumns = listOf(Users.id))
+
+                assertEquals(2, upserted.size)
+
+                // Verify both in database
+                val user1 = session.find<User>(9600)
+                val user2 = session.find<User>(9601)
+
+                assertEquals("UpdatedUser", user1?.name)  // Updated
+                assertEquals("NewUser", user2?.name)      // Inserted
+            }
+        }
+    }
+
+    // ========================================
+    // Complex Workflow Tests
+    // ========================================
+
+    @Test
+    fun `complex workflow - insert, update, delete`() {
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                // 1. Insert new user
+                val user = User(id = 9700, name = "Workflow", email = "workflow@example.com")
+                session.insert(user)
+
+                // 2. Verify inserted
+                val loaded = session.find<User>(9700)
+                assertEquals("Workflow", loaded?.name)
+
+                // 3. Update user
+                val updated = loaded!!.copy(email = "workflow.new@example.com")
+                session.update(updated)
+
+                // 4. Verify updated
+                val reloaded = session.find<User>(9700)
+                assertEquals("workflow.new@example.com", reloaded?.email)
+
+                // 5. Delete user
+                session.remove(reloaded!!)
+
+                // 6. Verify deleted
+                assertNull(session.find<User>(9700))
+            }
+        }
+    }
+
+    @Test
+    fun `mixed batch operations`() {
+        withConnection {
+            EntitySession(this.connection).use { session ->
+                // Insert batch
+                val newUsers = listOf(
+                    User(id = 9800, name = "Mixed1", email = "mixed1@example.com"),
+                    User(id = 9801, name = "Mixed2", email = "mixed2@example.com")
+                )
+                session.insertAll(newUsers)
+
+                // Update batch
+                val user1 = session.find<User>(9800)!!
+                val user2 = session.find<User>(9801)!!
+                val modified = listOf(
+                    user1.copy(email = "mixed1.new@example.com"),
+                    user2.copy(email = "mixed2.new@example.com")
+                )
+                session.updateAll(modified)
+
+                // Verify updates
+                val reloaded1 = session.find<User>(9800)
+                val reloaded2 = session.find<User>(9801)
+                assertEquals("mixed1.new@example.com", reloaded1?.email)
+                assertEquals("mixed2.new@example.com", reloaded2?.email)
+
+                // Delete batch
+                session.removeAll(listOf(reloaded1!!, reloaded2!!))
+
+                // Verify deleted
+                assertNull(session.find<User>(9800))
+                assertNull(session.find<User>(9801))
+            }
+        }
+    }
+}

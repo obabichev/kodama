@@ -198,7 +198,7 @@ class MarkerAccessorExtensionGenerator(
 class QueryBuilderNGenerator(
     private val tableCount: Int,
     private val generatedPackage: String,
-    private val schemaPackage: String
+    private val tablePackages: Map<String, String>  // Not used in this generator, but kept for API consistency
 ) : CodeGenerator {
 
     private val typeParams = (1..tableCount).joinToString(", ") { "T$it : TableMarker" } + ", " +
@@ -578,7 +578,8 @@ class PhantomJoinExtensionGenerator(
     private val fromTable: String,
     private val toTable: String,
     private val generatedPackage: String,
-    private val schemaPackage: String
+    private val fromPackage: String,
+    private val toPackage: String
 ) : CodeGenerator {
 
     override fun generate(): String = buildString {
@@ -599,7 +600,7 @@ class PhantomJoinExtensionGenerator(
             appendLine(" */")
             appendLine("@JvmName(\"${methodName}_${fromTable}_to_${toTable}\")")
             appendLine("fun <S1 : SelectionStatus, Sel : SelectionSet> $generatedPackage.QueryBuilder_1<$generatedPackage.${fromTable}Marker, S1, Sel>.$methodName(")
-            appendLine("    table: $schemaPackage.$toTable,")
+            appendLine("    table: $toPackage.$toTable,")
             appendLine("    condition: $generatedPackage.JoinContext_${fromTable}_$toTable.() -> com.obabichev.kodama.components.expression.Expression")
             appendLine("): $generatedPackage.QueryBuilder_2<$generatedPackage.${fromTable}Marker, $generatedPackage.${toTable}Marker, S1, TableNotSelected, Sel> {")
             appendLine("    val context = $generatedPackage.JoinContext_${fromTable}_$toTable(state, table)")
@@ -616,8 +617,8 @@ class PhantomJoinExtensionGenerator(
     }
 
     override fun requiredImports(): Set<String> = setOf(
-        "$schemaPackage.$fromTable",
-        "$schemaPackage.$toTable",
+        "$fromPackage.$fromTable",
+        "$toPackage.$toTable",
         "$generatedPackage.QueryBuilder_1",
         "$generatedPackage.QueryBuilder_2",
         "$generatedPackage.${fromTable}Marker",
@@ -647,7 +648,8 @@ class PhantomJoinContextGenerator(
     private val fromTable: String,
     private val toTable: String,
     private val generatedPackage: String,
-    private val schemaPackage: String
+    private val fromPackage: String,
+    private val toPackage: String
 ) : CodeGenerator {
 
     override fun generate(): String = buildString {
@@ -657,10 +659,10 @@ class PhantomJoinContextGenerator(
         appendLine(" */")
         appendLine("class JoinContext_${fromTable}_$toTable(")
         appendLine("    val state: com.obabichev.kodama.query.QueryState,")
-        appendLine("    private val joiningTable: $schemaPackage.$toTable")
+        appendLine("    private val joiningTable: $toPackage.$toTable")
         appendLine(") {")
         appendLine("    val ${fromTable.replaceFirstChar { it.lowercase() }}: $generatedPackage.${fromTable}Accessor = $generatedPackage.${fromTable}Accessor(")
-        appendLine("        com.obabichev.kodama.query.TableAccessor($schemaPackage.$fromTable, state.relations)")
+        appendLine("        com.obabichev.kodama.query.TableAccessor($fromPackage.$fromTable, state.relations)")
         appendLine("    )")
         appendLine("    val ${toTable.replaceFirstChar { it.lowercase() }}: $generatedPackage.${toTable}Accessor = $generatedPackage.${toTable}Accessor(")
         appendLine("        com.obabichev.kodama.query.TableAccessor(joiningTable, state.relations)")
@@ -670,8 +672,8 @@ class PhantomJoinContextGenerator(
     }
 
     override fun requiredImports(): Set<String> = setOf(
-        "$schemaPackage.$fromTable",
-        "$schemaPackage.$toTable",
+        "$fromPackage.$fromTable",
+        "$toPackage.$toTable",
         "$generatedPackage.${fromTable}Accessor",
         "$generatedPackage.${toTable}Accessor",
         "com.obabichev.kodama.query.QueryState",
@@ -701,7 +703,8 @@ class PhantomMultiTableJoinExtensionGenerator(
     private val currentTableCount: Int,  // N (current number of tables in query)
     private val fromPosition: Int,       // Which position the fromTable is in (1 to N)
     private val generatedPackage: String,
-    private val schemaPackage: String
+    private val fromPackage: String,
+    private val toPackage: String
 ) : CodeGenerator {
 
     private val nextTableCount = currentTableCount + 1
@@ -769,8 +772,8 @@ class PhantomMultiTableJoinExtensionGenerator(
     }
 
     override fun requiredImports(): Set<String> = setOf(
-        "$schemaPackage.$fromTable",
-        "$schemaPackage.$toTable",
+        "$fromPackage.$fromTable",
+        "$toPackage.$toTable",
         "$generatedPackage.QueryBuilder_$currentTableCount",
         "$generatedPackage.QueryBuilder_$nextTableCount",
         "$generatedPackage.${fromTable}Marker",

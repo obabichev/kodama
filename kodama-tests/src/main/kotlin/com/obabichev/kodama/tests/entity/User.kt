@@ -19,4 +19,10 @@ interface User {
      * Implementation is generated based on Users.orders oneToMany declaration.
      */
     fun orders(session: EntitySession): List<UserOrder>
+
+    /**
+     * Get all roles for this user through the UserRoles junction table.
+     * Implementation is generated based on Users.roles manyToMany declaration.
+     */
+    fun roles(session: EntitySession): List<Role>
 }

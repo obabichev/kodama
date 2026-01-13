@@ -27,6 +27,11 @@ data class TableInfo(
     val name: String,
 
     /**
+     * Package name where the table is defined (e.g., "com.example.schema")
+     */
+    val packageName: String,
+
+    /**
      * SQL table name in snake_case (e.g., "person", "order_item")
      */
     val sqlTableName: String,

@@ -29,8 +29,17 @@ abstract class KodamaExtension(project: Project) {
     /**
      * Package where generated query extensions will be placed.
      *
-     * Default: Same as schemaPackage + ".generated"
+     * Default: Auto-detected (prefers ".schema" package if multiple packages detected) + ".generated"
      * Example: "com.mycompany.myproject.generated"
+     *
+     * When tables are in multiple packages (e.g., both schema and entity packages),
+     * Kodama will prefer the ".schema" package for stability. To override this behavior,
+     * explicitly set this property:
+     * ```kotlin
+     * kodama {
+     *     generatedPackage.set("com.mycompany.myproject.entity.generated")
+     * }
+     * ```
      */
     abstract val generatedPackage: Property<String>
 

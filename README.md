@@ -529,18 +529,20 @@ RETURNING id;  -- Generated ID returned automatically
 
 ### Entity Layer (ORM)
 
-Define entities as interfaces with automatic implementation generation:
+Kodama provides a complete ORM layer with interface-based entities, relationships, lifecycle management, and efficient data loading.
+
+#### Define Entities and Tables
 
 ```kotlin
-// Entity interface
+// Entity interfaces
 interface User {
     val id: Int
     val name: String
     val email: String
 
-    // Relationship method with context parameter
-    context(session: EntitySession)
-    fun orders(): List<UserOrder>
+    // Relationships
+    fun orders(session: EntitySession): List<UserOrder>
+    fun roles(session: EntitySession): List<Role>
 }
 
 interface UserOrder {
@@ -549,8 +551,14 @@ interface UserOrder {
     val product: String
     val amount: Int
 
-    context(session: EntitySession)
-    fun user(): User
+    fun user(session: EntitySession): User
+}
+
+interface Role {
+    val id: Int
+    val name: String
+
+    fun users(session: EntitySession): List<User>
 }
 
 // EntityTable definitions with relationships
@@ -561,6 +569,7 @@ object Users : EntityTable<User>("users") {
 
     init {
         oneToMany("orders", UserOrders, UserOrders.userId, this.id)
+        manyToMany("roles", Roles, UserRoles, UserRoles.userId, UserRoles.roleId, Roles.id)
     }
 }
 
@@ -574,56 +583,158 @@ object UserOrders : EntityTable<UserOrder>("user_orders") {
         manyToOne("user", Users, this.userId, Users.id)
     }
 }
-```
 
-**Usage with EntitySession:**
+object Roles : EntityTable<Role>("roles") {
+    val id = integer("id").primaryKey()
+    val name = varchar("name", 255)
 
-```kotlin
-EntitySession(connection).use { session ->
-    with(session) {
-        // Get entity by ID (throws if not found - no !! needed)
-        val user = get<User>(1)
-        println("${user.name} (${user.email})")
-
-        // Or use find() if entity might not exist (returns nullable)
-        val maybeUser = find<User>(999)
-        if (maybeUser != null) {
-            println(maybeUser.name)
-        }
-
-        // Navigate relationships (one-to-many)
-        val orders = user.orders()
-        orders.forEach { order ->
-            println("  - ${order.product}: $${order.amount}")
-        }
-
-        // Navigate back (many-to-one)
-        val firstOrder = orders.first()
-        val parentUser = firstOrder.user()
-        assert(user === parentUser)  // Same instance from identity map!
-
-        // Create and save new entity
-        val newOrder = UserOrder(
-            id = 100,
-            userId = user.id,
-            product = "Headphones",
-            amount = 80
-        )
-        save<UserOrder, Int>(newOrder)
-        flush()
+    init {
+        manyToMany("users", Users, UserRoles, UserRoles.roleId, UserRoles.userId, Users.id)
     }
+}
+
+object UserRoles : EntityTable<UserRole>("user_roles") {
+    val userId = integer("user_id")
+    val roleId = integer("role_id")
 }
 ```
 
-**Key Entity Layer Features:**
+#### CRUD Operations
 
-- **Interface-based entities** - Define contract, get implementation for free
-- **Identity map** - Same ID always returns same instance within session
-- **Convenient API** - `get<Entity>(id)` returns non-null, `find<Entity>(id)` returns nullable
-- **Type-safe relationships** - Navigate parent ↔ children with compile-time safety
-- **Context parameters** - Clean syntax using Kotlin 2.2.0 context parameters
-- **Lazy loading** - Relationships loaded on-demand
-- **Bidirectional navigation** - Both one-to-many and many-to-one work seamlessly
+```kotlin
+EntitySession(connection).use { session ->
+    // CREATE - smart persist (automatically chooses INSERT or UPDATE)
+    val user = User(id = 1, name = "Alice", email = "alice@example.com")
+    session.persist(user)  // INSERT
+
+    // READ
+    val loaded = session.find<User>(1)  // Returns User? (nullable)
+    val required = session.get<User>(1)  // Returns User (throws if not found)
+
+    // UPDATE
+    val modified = loaded!!.copy(email = "alice.new@example.com")
+    session.persist(modified)  // UPDATE (only changed fields)
+
+    // DELETE
+    session.remove(user)  // Immediate deletion
+
+    // UPSERT (PostgreSQL)
+    session.upsert(user, conflictColumns = listOf(Users.id))
+
+    // Batch operations
+    session.persistAll(listOf(user1, user2, user3))
+    session.insertAll(listOf(user4, user5, user6))
+    session.updateAll(listOf(user7, user8, user9))
+    session.removeAll(listOf(user10, user11, user12))
+}
+```
+
+#### Navigate Relationships
+
+```kotlin
+EntitySession(connection).use { session ->
+    val user = session.get<User>(1)
+
+    // One-to-many: parent → children
+    val orders = user.orders(session)
+    orders.forEach { order ->
+        println("${order.product}: ${order.amount}")
+    }
+
+    // Many-to-one: child → parent
+    val firstOrder = orders.first()
+    val parentUser = firstOrder.user(session)
+    assert(user === parentUser)  // Same instance from identity map!
+
+    // Many-to-many: through junction table
+    val roles = user.roles(session)
+    println("User has roles: ${roles.map { it.name }}")
+}
+```
+
+#### Lifecycle Hooks
+
+Register callbacks for validation, audit logging, computed fields:
+
+```kotlin
+EntitySession(connection).use { session ->
+    // Register listener
+    session.registerListener(User::class, object : EntityListener<User> {
+        override fun onPrePersist(entity: User, session: EntitySession) {
+            require(entity.email.contains("@")) { "Invalid email" }
+        }
+
+        override fun onPreUpdate(entity: User, old: User, session: EntitySession) {
+            auditLog.log("User ${entity.id} changed: ${old.email} → ${entity.email}")
+        }
+
+        override fun onPostLoad(entity: User, session: EntitySession) {
+            println("Loaded user: ${entity.name}")
+        }
+    })
+
+    // Operations trigger hooks
+    session.persist(user)  // Validates email, logs changes
+}
+```
+
+#### Eager Loading (N+1 Prevention)
+
+Batch load relationships to prevent performance issues:
+
+```kotlin
+EntitySession(connection).use { session ->
+    // Load users
+    val users = listOf(
+        session.get<User>(1),
+        session.get<User>(2),
+        session.get<User>(3)
+    )
+
+    // Batch load all orders in ONE query (prevents N+1)
+    users.withOneToMany<User, UserOrder, Int, Int>(
+        session, User::class, "orders",
+        UserOrders, UserOrders.userId, { it.id }
+    )
+
+    // Access orders - returns cached results, NO additional queries!
+    users.forEach { user ->
+        val orders = user.orders(session)  // Already loaded ✅
+        println("${user.name}: ${orders.size} orders")
+    }
+}
+// Total: 2 queries instead of 1 + N queries
+```
+
+#### Key Entity Layer Features
+
+**Core Features:**
+- ✅ **Interface-based entities** - Define contract, get implementation for free
+- ✅ **Identity map** - Same ID always returns same instance within session
+- ✅ **Change tracking** - Automatic dirty detection with snapshots
+- ✅ **Zero reflection** - All type safety via code generation
+
+**CRUD Operations:**
+- ✅ **Smart persist** - `persist()` automatically chooses INSERT or UPDATE
+- ✅ **Explicit operations** - `insert()`, `update()`, `remove()` for explicit control
+- ✅ **Batch operations** - `persistAll()`, `insertAll()`, `updateAll()`, `removeAll()`
+- ✅ **Upsert support** - PostgreSQL `INSERT ... ON CONFLICT ... DO UPDATE`
+- ✅ **Partial updates** - Only changed fields are sent to database
+
+**Relationships:**
+- ✅ **One-to-many** - Parent has many children (e.g., User → Orders)
+- ✅ **Many-to-one** - Child belongs to parent (e.g., Order → User)
+- ✅ **Many-to-many** - Junction table support (e.g., User ↔ Roles)
+- ✅ **Lazy loading** - Relationships loaded on-demand
+- ✅ **Eager loading** - Batch load to prevent N+1 queries
+
+**Lifecycle Management:**
+- ✅ **Entity lifecycle hooks** - Pre/post callbacks for persist, update, delete, load
+- ✅ **Validation** - Validate entities before persistence
+- ✅ **Audit logging** - Track who changed what and when
+- ✅ **Computed fields** - Auto-update timestamps and derived values
+
+**See [Entity Layer Documentation](doc/entities.md) for complete guide with examples.**
 
 ## Documentation
 

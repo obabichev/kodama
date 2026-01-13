@@ -4,26 +4,34 @@ import com.obabichev.kodama.entity.EntityBinding
 import com.obabichev.kodama.entity.EntitySession
 import com.obabichev.kodama.tests.entity.User
 import com.obabichev.kodama.tests.entity.UserOrder
-import com.obabichev.kodama.tests.entity.impl.UserEntityBinding
-import com.obabichev.kodama.tests.entity.impl.UserOrderEntityBinding
+import com.obabichev.kodama.tests.entity.Role
+import com.obabichev.kodama.tests.entity.UserRole
+import com.obabichev.kodama.tests.entity.generated.UserEntityBinding
+import com.obabichev.kodama.tests.entity.generated.UserOrderEntityBinding
+import com.obabichev.kodama.tests.entity.generated.RoleEntityBinding
+import com.obabichev.kodama.tests.entity.generated.UserRoleEntityBinding
 import kotlin.reflect.KClass
 import kotlin.reflect.full.allSuperclasses
 
 /**
- * Auto-generated binding registry for Kodama entity layer.
+ * Binding registry for Kodama entity layer using generated bindings.
  *
  * This object is automatically initialized when tests run, setting up
  * the EntitySession.autoBindingProvider to enable automatic entity binding lookup.
  *
- * Generated bindings:
- * - User -> UserEntityBinding
- * - UserOrder -> UserOrderEntityBinding
+ * Uses generated bindings from com.obabichev.kodama.tests.entity.generated:
+ * - User -> UserEntityBinding (generated)
+ * - UserOrder -> UserOrderEntityBinding (generated)
+ * - Role -> RoleEntityBinding (generated)
+ * - UserRole -> UserRoleEntityBinding (generated)
  */
 object KodamaBindingRegistry {
 
     private val bindings: Map<KClass<*>, EntityBinding<*, *>> = mapOf(
         User::class to UserEntityBinding,
-        UserOrder::class to UserOrderEntityBinding
+        UserOrder::class to UserOrderEntityBinding,
+        Role::class to RoleEntityBinding,
+        UserRole::class to UserRoleEntityBinding
     )
 
     init {

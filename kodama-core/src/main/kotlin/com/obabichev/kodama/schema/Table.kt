@@ -446,6 +446,14 @@ abstract class EntityTable<E : Any>(tableName: String) : Table(tableName) {
     internal fun registerManyToOne(relationship: com.obabichev.kodama.entity.ManyToOneRelationship<*, *>) {
         _relationships[relationship.name] = relationship
     }
+
+    /**
+     * Register a many-to-many relationship.
+     * Internal - called by manyToMany() DSL function.
+     */
+    internal fun registerManyToMany(relationship: com.obabichev.kodama.entity.ManyToManyRelationship<*, *, *>) {
+        _relationships[relationship.name] = relationship
+    }
 }
 
 /**

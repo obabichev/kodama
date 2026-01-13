@@ -3,6 +3,7 @@ package com.obabichev.kodama.entity
 import com.obabichev.kodama.components.Column
 import com.obabichev.kodama.schema.EntityTable
 import java.sql.ResultSet
+import kotlin.reflect.KClass
 
 /**
  * Binding between an entity type and its database table.
@@ -56,6 +57,12 @@ import java.sql.ResultSet
  * @param ID Primary key type (e.g., Int, Long, String)
  */
 interface EntityBinding<E : Any, ID : Any> {
+
+    /**
+     * The entity class this binding is for.
+     * Used for automatic binding registration.
+     */
+    val entityClass: KClass<E>
 
     /**
      * The EntityTable this binding is for.

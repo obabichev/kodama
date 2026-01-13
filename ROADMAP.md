@@ -451,33 +451,107 @@ PostgreSQL array types and operations.
 
 ## Entity Layer (ORM)
 
-### High Priority Features
+### ✅ Phase 1-5: Core Entity Layer (Complete)
 
-#### 1. Many-to-Many Relationships
+**Status:** ✅ Complete (January 2026)
+**Test Coverage:** 76+ tests passing (CRUD, relationships, lifecycle, eager loading)
+**Documentation:** See `doc/entities.md` and `doc/internal/entity-layer-implementation-roadmap.md`
 
-**Status:** Not implemented
-**Priority:** ⭐⭐ High
+**Implemented features:**
+- ✅ EntitySession with identity map (one instance per ID)
+- ✅ Entity lifecycle states (NEW, MANAGED, PENDING_INSERT, PENDING_UPDATE, PENDING_DELETE)
+- ✅ CRUD operations: `find()`, `get()`, `persist()`, `insert()`, `update()`, `remove()`, `flush()`
+- ✅ Batch operations: `persistAll()`, `insertAll()`, `updateAll()`, `removeAll()`
+- ✅ Change tracking with snapshots (automatic dirty detection)
+- ✅ Interface-based entities with generated data class implementations
+- ✅ Auto-binding registry with zero-boilerplate auto-discovery (no manual setup required)
+- ✅ OneToMany, ManyToOne, and ManyToMany relationships
+- ✅ Relationship queries (`findByForeignKey`, `findManyToMany`)
+- ✅ Entity lifecycle hooks (pre/post persist, update, delete, load)
+- ✅ Eager loading for N+1 query prevention
+- ✅ Session statistics and cache management
+
+**Core Files:**
+- `EntitySession.kt` (746 lines)
+- `EntityBinding.kt` (126 lines)
+- `Relationship.kt` + `RelationshipDsl.kt` (171 lines)
+- `IdentityMap.kt` (97 lines)
+- `EntitySessionTests.kt` (1,119 lines, 49 tests)
+
+**Example Usage:**
+```kotlin
+EntitySession(connection).use { session ->
+    with(session) {
+        // Find entity
+        val user = get<User>(1)
+
+        // Load relationships
+        val orders = user.orders(session)
+
+        // Modify entity
+        val modified = user.copy(name = "Updated")
+        save<User, Int>(modified)
+
+        // Delete entity
+        delete(user)
+
+        // Persist changes
+        flush()
+    }
+}
+```
+
+---
+
+### ✅ Phase 5: Essential Missing Features (Complete)
+
+**Status:** ✅ Complete (January 2026)
+**Duration:** Completed
+**Priority:** ⭐⭐⭐ Critical
+**Test Coverage:** 27 additional tests (lifecycle hooks, many-to-many, eager loading)
+
+#### 5.1 Entity Lifecycle Hooks ✅
+
+**Status:** ✅ Complete (January 2026)
+**Priority:** ⭐⭐⭐ Critical
+**Test Coverage:** 11 new tests, 41 total tests passing
+
+Register callbacks for entity lifecycle events (audit logging, validation, computed fields):
+
+```kotlin
+session.registerListener(User::class, object : EntityListener<User> {
+    override fun onPreUpdate(entity: User, old: User, session: EntitySession) {
+        auditLog.log("User ${entity.id} changed: ${old.email} → ${entity.email}")
+    }
+
+    override fun onPrePersist(entity: User, session: EntitySession) {
+        require(entity.email.contains("@")) { "Invalid email" }
+    }
+})
+```
+
+**Implementation Tasks:**
+- Add `EntityListener<E>` interface with lifecycle methods
+- Add listener registry to EntitySession
+- Call hooks in flush() operations (executeInsert, executeUpdate, executeDelete)
+- Add onPostLoad hook in loadFromDatabase()
+- Add comprehensive tests for all lifecycle events
+
+**Use Cases:**
+- Audit logging (track who changed what)
+- Validation (enforce business rules)
+- Computed fields (auto-update timestamps)
+- Event sourcing (publish domain events)
+
+#### 5.2 Many-to-Many Relationships ✅
+
+**Status:** ✅ Complete (January 2026)
+**Priority:** ⭐⭐⭐ Critical
+**Test Coverage:** 12 tests in ManyToManyRelationshipTests.kt
 
 Junction table support for many-to-many relationships:
 
 ```kotlin
-// Entity definitions
-interface User {
-    val id: Int
-    val name: String
-
-    context(session: EntitySession)
-    fun roles(): List<Role>
-}
-
-interface Role {
-    val id: Int
-    val name: String
-
-    context(session: EntitySession)
-    fun users(): List<User>
-}
-
 // EntityTable with many-to-many
 object Users : EntityTable<User>("users") {
     val id = integer("id").primaryKey()
@@ -488,272 +562,286 @@ object Users : EntityTable<User>("users") {
     }
 }
 
+// Generated interface methods
+interface User {
+    val id: Int
+    val name: String
+
+    fun roles(session: EntitySession): List<Role>
+    fun setRoles(session: EntitySession, roles: List<Role>)
+    fun addRole(session: EntitySession, role: Role)
+    fun removeRole(session: EntitySession, role: Role)
+}
+
 // Usage
-EntitySession(connection).use { session ->
-    with(session) {
-        val user = get<User>(1)
-        val roles = user.roles()
-        roles.forEach { println(it.name) }
-    }
+session.with {
+    val user = get<User>(1)
+    val roles = user.roles(session)  // SELECT with JOIN
+    user.addRole(session, adminRole)  // INSERT INTO user_roles
+    flush()
 }
 ```
 
 **Implementation Tasks:**
-
-- Add `manyToMany()` declaration to EntityTable
+- Add `ManyToManyRelationship` to Relationship.kt
+- Add `manyToMany()` DSL function to RelationshipDsl.kt
 - Implement `findManyToMany()` in EntitySession
-- Generate junction table queries (SELECT with JOIN)
-- Support adding/removing relationships
+- Generate relationship accessor methods
+- Implement INSERT/DELETE for join table modifications
 - Add tests for many-to-many operations
 
----
+#### 5.3 Eager Loading (N+1 Prevention) ✅
 
-#### 2. Improved Entity CRUD API
+**Status:** ✅ Complete (January 2026)
+**Priority:** ⭐⭐ High
+**Test Coverage:** 4 tests in EagerLoadingTests.kt
+
+Batch load relationships to avoid N+1 queries:
+
+```kotlin
+// Without eager loading - N+1 queries
+val users = session.findAll<User>()
+users.forEach { user ->
+    user.orders(session)  // SELECT per user - N queries!
+}
+
+// With eager loading - 2 queries total
+val users = session.findAll<User>().with(Users.orders)
+users.forEach { user ->
+    user.orders(session)  // Already loaded, no query
+}
+
+// Multiple relationships
+session.findAll<User>()
+    .with(Users.orders)
+    .with(Users.profile)
+
+// Nested eager loading
+session.findAll<User>()
+    .with(Users.orders) {
+        with(Orders.product)
+    }
+```
+
+**Implementation Tasks:**
+- Add `EagerLoadContext` class to track what to preload
+- Add `.with()` extension method
+- Implement batch loading (IN queries)
+- Store preloaded relationships in session cache
+- Modify relationship accessors to check cache first
+- Add tests comparing N+1 vs batch loading
+
+#### 5.4 Improved Entity CRUD API (Extension Functions)
 
 **Status:** Not implemented
 **Priority:** ⭐⭐ High
+**Estimated Effort:** 3-4 days
 
-Refactor CRUD operations to use extension functions for cleaner syntax:
+Extension functions for cleaner syntax:
 
-**Current API:**
-
+**Current API (verbose):**
 ```kotlin
-EntitySession(connection).use { session ->
-    with(session) {
-        val user = get<User>(1)
-
-        // Verbose - requires explicit type parameters
-        save<UserOrder, Int>(newOrder)
-        delete(user)
-        flush()
-    }
+with(session) {
+    save<User, Int>(user)  // Type parameters required
+    delete(user)
 }
 ```
 
-**Proposed API:**
-
+**Proposed API (clean):**
 ```kotlin
-EntitySession(connection).use { session ->
-    with(session) {
-        val user = get<User>(1)
-
-        // Clean extension function syntax
-        newOrder.save()
-        user.delete()
-
-        flush()
-    }
+with(session) {
+    user.save()   // Extension function, no type params
+    user.delete() // Extension function
 }
 ```
-
-**Benefits:**
-
-- More idiomatic Kotlin (object-oriented style)
-- No explicit type parameters needed
-- Better IDE discoverability
-- Aligns with relationship navigation syntax
 
 **Implementation Tasks:**
-
-- Generate `Entity.save()` extension functions with `context(EntitySession)`
-- Generate `Entity.delete()` extension functions with `context(EntitySession)`
-- Keep existing `session.save()` and `session.delete()` for backward compatibility
-- Update code generator
-- Add tests
+- Generate extension functions with `context(EntitySession)`
+- Keep existing methods for backward compatibility
 - Update documentation
+- Add tests
 
 ---
 
-#### 3. Batch Loading (N+1 Prevention)
+### Phase 6: Advanced Features (Medium Priority)
 
-**Status:** Not implemented
-**Priority:** ⭐ High
+**Status:** Not started
+**Duration:** 3-4 weeks
+**Priority:** ⭐ Medium
 
-Load multiple related entities in one query:
+#### 6.1 Ordered Collections (Default ORDER BY)
+
+**Priority:** ⭐ Medium
+**Estimated Effort:** 3-4 days
+
+Default ordering for relationships:
 
 ```kotlin
-EntitySession(connection).use { session ->
-    with(session) {
-        val users = findAll<User>()
+object Users : EntityTable<User>("users") {
+    val orders = oneToMany(Orders, Orders.userId, this.id)
+        .orderBy(Orders.createdAt.desc(), Orders.id.desc())
+}
 
-        // Naive approach - N+1 queries
-        users.forEach { user ->
-            val orders = user.orders()  // SELECT per user
-        }
+// Usage - automatically ordered
+val orders = user.orders(session)
+```
 
-        // Batch loading - 1 query for all orders
-        val allOrders = batchLoad(users) { it.orders() }
-        // SELECT * FROM user_orders WHERE user_id IN (?, ?, ?, ...)
+#### 6.2 Self-Referencing Entities
+
+**Priority:** ⭐ Medium
+**Estimated Effort:** 3-4 days
+
+Tree structures and graphs:
+
+```kotlin
+object Nodes : EntityTable<Node>("nodes") {
+    init {
+        manyToOne("parent", this, this.parentId, this.id).nullable()
+        oneToMany("children", this, this.parentId, this.id)
     }
 }
 ```
 
-**Implementation Tasks:**
+#### 6.3 Cache Management Enhancements
 
-- Implement `batchLoad()` method
-- Generate IN queries for batch loading
-- Populate relationship collections
-- Add performance tests comparing N+1 vs batch
+**Priority:** ⭐ Medium
+**Estimated Effort:** 4-5 days
+
+LRU eviction, cache limits, detailed statistics:
+
+```kotlin
+session.setCacheLimit(1000)
+session.evict(user)
+val stats = session.stats()  // Hit rate, query count
+```
+
+#### 6.4 Database-Generated Values
+
+**Priority:** ⭐ Medium
+**Estimated Effort:** 4-5 days
+
+Auto-increment IDs, timestamps:
+
+```kotlin
+object Users : EntityTable<User>("users") {
+    val id = serial("id").primaryKey()
+    val createdAt = timestamp("created_at").default(CURRENT_TIMESTAMP)
+    val updatedAt = timestamp("updated_at").onUpdate(CURRENT_TIMESTAMP)
+}
+```
+
+#### 6.5 Composite Primary Keys
+
+**Priority:** ⭐ Medium
+**Estimated Effort:** 1 week
+
+Multi-column primary keys:
+
+```kotlin
+object UserRoles : EntityTable<UserRole>("user_roles") {
+    val userId = integer("user_id").primaryKey()
+    val roleId = integer("role_id").primaryKey()
+}
+
+// Usage
+data class UserRoleId(val userId: Int, val roleId: Int)
+session.find<UserRole>(UserRoleId(1, 5))
+```
 
 ---
 
-### Medium Priority Features
+### Phase 7: Specialized Features (Lower Priority)
 
-#### 4. Cascade Operations
+**Status:** Not started
+**Duration:** 2-3 weeks
+**Priority:** Low
 
-**Status:** Not implemented
-**Priority:** Medium
+#### 7.1 Field Transformations
+
+**Priority:** Low
+**Estimated Effort:** 4-5 days
+
+Encryption, JSON serialization:
+
+```kotlin
+object Users : EntityTable<User>("users") {
+    val password = varchar("password", 255)
+        .transform(
+            toDatabase = { encrypt(it) },
+            fromDatabase = { decrypt(it) }
+        )
+}
+```
+
+#### 7.2 Entity Refresh
+
+**Priority:** Low
+**Estimated Effort:** 2-3 days
+
+Reload entity from database:
+
+```kotlin
+session.refresh(user)  // Discard changes, reload from DB
+```
+
+#### 7.3 Bidirectional Relationship Validation
+
+**Priority:** Low
+**Estimated Effort:** 3-4 days
+
+Validate relationships are properly bidirectional at compile time.
+
+---
+
+### Phase 8: Optimizations and Alternatives (Future)
+
+**Status:** Future consideration
+
+#### 8.1 Thin Entity Client Pattern (Opt-In)
+
+Memory optimization via property delegation:
+
+```kotlin
+@ThinClient  // Opt-in annotation
+interface User {
+    val id: Int
+    var name: String  // Delegated to session cache
+}
+```
+
+**Benefits:** ~70% memory savings per entity
+**Trade-offs:** Slower property access, no immutability
+
+#### 8.2 Cascade Operations
 
 Automatically propagate operations to related entities:
 
 ```kotlin
 object Users : EntityTable<User>("users") {
-    val id = integer("id").primaryKey()
-    val name = varchar("name", 255)
-
     init {
         oneToMany("orders", UserOrders, UserOrders.userId, this.id)
-            .cascade(CascadeType.DELETE)  // Delete orders when user deleted
+            .cascade(CascadeType.DELETE)
     }
 }
 
 // Usage
-EntitySession(connection).use { session ->
-    with(session) {
-        val user = get<User>(1)
-        delete(user)  // Automatically deletes all user's orders!
-        flush()
-    }
-}
+session.delete(user)
+session.flush()  // Automatically deletes all user's orders
 ```
 
-**Cascade Types:**
+**Cascade Types:** SAVE, DELETE, ALL
 
-- `CascadeType.SAVE` - Save related entities when parent saved
-- `CascadeType.DELETE` - Delete related entities when parent deleted
-- `CascadeType.ALL` - Cascade all operations
-
----
-
-### Lower Priority Features
-
-#### 5. Composite Primary Keys
-
-**Status:** Not implemented
-**Priority:** Low
-
-Support entities with multi-column primary keys:
-
-```kotlin
-interface UserRole {
-    val userId: Int
-    val roleId: Int
-    val assignedAt: Instant
-}
-
-object UserRoles : EntityTable<UserRole>("user_roles") {
-    val userId = integer("user_id").primaryKey()
-    val roleId = integer("role_id").primaryKey()
-    val assignedAt = timestamp("assigned_at")
-}
-
-// Usage with composite key
-data class UserRoleId(val userId: Int, val roleId: Int)
-
-EntitySession(connection).use { session ->
-    val userRole = session.find<UserRole>(UserRoleId(1, 5))
-}
-```
-
----
-
-#### 6. Lazy vs Eager Loading
-
-**Status:** Not implemented (currently all relationships are lazy)
-**Priority:** Low
-
-Control when relationships are loaded:
-
-```kotlin
-object Users : EntityTable<User>("users") {
-    val id = integer("id").primaryKey()
-    val name = varchar("name", 255)
-
-    init {
-        oneToMany("orders", UserOrders, UserOrders.userId, this.id)
-            .lazy()  // Load on-demand (default)
-
-        oneToOne("profile", UserProfiles, UserProfiles.userId, this.id)
-            .eager()  // Load immediately with parent
-    }
-}
-```
-
----
-
-#### 7. Optimistic Locking
-
-**Status:** Not implemented
-**Priority:** Low
+#### 8.3 Optimistic Locking
 
 Version field for concurrent update detection:
 
 ```kotlin
-interface User {
-    val id: Int
-    val name: String
-    val email: String
-    val version: Int  // Optimistic lock version
-}
-
 object Users : EntityTable<User>("users") {
-    val id = integer("id").primaryKey()
-    val name = varchar("name", 255)
-    val email = varchar("email", 255)
-    val version = integer("version").version()  // Mark as version column
+    val version = integer("version").version()
 }
 
-// Usage
-EntitySession(connection).use { session ->
-    with(session) {
-        val user = get<User>(1)  // version = 5
-        user.name = "Updated"
-
-        flush()
-        // UPDATE users SET name = ?, version = 6 WHERE id = ? AND version = 5
-        // Throws OptimisticLockException if version mismatch
-    }
-}
-```
-
----
-
-#### 8. Entity Lifecycle Callbacks
-
-**Status:** Not implemented
-**Priority:** Low
-
-Hooks for entity lifecycle events:
-
-```kotlin
-interface User {
-    val id: Int
-    val name: String
-    val createdAt: Instant
-    val updatedAt: Instant
-
-    fun onPrePersist() {
-        // Called before INSERT
-    }
-
-    fun onPostLoad() {
-        // Called after entity loaded from database
-    }
-
-    fun onPreUpdate() {
-        // Called before UPDATE
-    }
-}
+// UPDATE users SET ..., version = version + 1 WHERE id = ? AND version = ?
+// Throws OptimisticLockException if version mismatch
 ```
 
 ---
@@ -802,60 +890,81 @@ class R2dbcEntitySession(private val connection: Connection) {
 
 ## Recommended Implementation Order
 
-**📋 Phase 1: CRUD Completion** ⭐⭐⭐ Critical Priority
+### Current Status
+
+**✅ Entity Layer Phase 1-4: COMPLETE** (January 2026)
+- EntitySession, identity map, CRUD operations
+- 49 tests passing, production-ready foundation
+
+**Next Priorities:**
+
+**📋 DSL Phase 1: CRUD Completion** ⭐⭐⭐ Critical Priority (DSL Layer)
 
 1. UPDATE statements
 2. DELETE statements
 3. HAVING clause for aggregate filtering
 
-**📋 Phase 2: JOIN Enhancements** ⭐⭐ High Priority
+**📋 Entity Layer Phase 5: Essential Missing Features** ⭐⭐⭐ Critical Priority (Entity Layer)
 
-4. LEFT/RIGHT/FULL OUTER JOIN
-5. DISTINCT / DISTINCT ON
+4. Entity lifecycle hooks (audit logging, validation)
+5. Many-to-many relationships
+6. Eager loading (N+1 prevention)
+7. Improved Entity CRUD API (extension functions)
 
-**📋 Phase 3: Conditional Logic** ⭐ High Priority
+**📋 DSL Phase 2: JOIN Enhancements** ⭐⭐ High Priority (DSL Layer)
 
-6. CASE expressions
+8. ✅ LEFT/RIGHT/FULL OUTER JOIN (Complete)
+9. DISTINCT / DISTINCT ON
 
-**📋 Phase 4: Entity Layer Enhancements** ⭐⭐ High Priority
+**📋 DSL Phase 3: Conditional Logic** ⭐ High Priority (DSL Layer)
 
-7. Many-to-many relationships
-8. Improved Entity CRUD API (extension functions)
-9. Batch loading (N+1 prevention)
+10. CASE expressions
 
-**📋 Phase 5: Advanced Queries** Medium Priority
+**📋 Entity Layer Phase 6: Advanced Features** ⭐ Medium Priority (Entity Layer)
 
-10. Common Table Expressions (Non-Recursive WITH)
-11. UNION/INTERSECT/EXCEPT with type coercion
+11. Ordered collections (default ORDER BY)
+12. Self-referencing entities
+13. Cache management enhancements
+14. Database-generated values
+15. Composite primary keys
 
-**📋 Phase 6: Entity Layer Advanced** Medium Priority
+**📋 DSL Phase 4: Advanced Queries** Medium Priority (DSL Layer)
 
-12. Cascade operations
-13. Composite primary keys
-14. Lazy vs eager loading
+16. Common Table Expressions (Non-Recursive WITH)
+17. UNION/INTERSECT/EXCEPT with type coercion
 
-**📋 Phase 7: Specialized PostgreSQL Features** Lower Priority
+**📋 Entity Layer Phase 7: Specialized Features** Lower Priority (Entity Layer)
 
-15. Window functions
-16. LATERAL joins
-17. Table inheritance hierarchies
-18. JSON/JSONB operations
-19. Array operations
+18. Field transformations
+19. Entity refresh
+20. Bidirectional relationship validation
 
-**📋 Phase 8: Performance and Infrastructure** Lower Priority
+**📋 DSL Phase 5: Specialized PostgreSQL Features** Lower Priority (DSL Layer)
 
-20. Optimistic locking
-21. Entity lifecycle callbacks
-22. Query result caching
-23. Connection pooling improvements
-24. Migration support
-25. Batch operations
+21. Window functions
+22. LATERAL joins
+23. Table inheritance hierarchies
+24. JSON/JSONB operations
+25. Array operations
 
-**📋 Phase 9: Async/Reactive Support** Future
+**📋 Entity Layer Phase 8: Optimizations** Future (Entity Layer)
 
-26. R2DBC driver support
-27. Suspend functions for entity operations
-28. Coroutine-based query execution
+26. Thin entity client pattern (opt-in)
+27. Cascade operations
+28. Optimistic locking
+
+**📋 Infrastructure: Performance and Infrastructure** Lower Priority
+
+29. Query result caching
+30. Connection pooling improvements
+31. Migration support
+32. Batch operations
+
+**📋 Future: Async/Reactive Support**
+
+33. R2DBC driver support
+34. Suspend functions for entity operations
+35. Coroutine-based query execution
 
 ---
 

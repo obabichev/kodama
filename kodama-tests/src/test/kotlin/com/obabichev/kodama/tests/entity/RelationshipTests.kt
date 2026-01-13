@@ -4,7 +4,7 @@ import com.obabichev.kodama.entity.EntitySession
 import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.tests.entity.User
 import com.obabichev.kodama.tests.entity.UserOrder
-import com.obabichev.kodama.tests.entity.impl.UserOrder  // Factory function
+import com.obabichev.kodama.tests.entity.generated.UserOrder  // Factory function
 import com.obabichev.kodama.tests.infrastructure.DatabaseTest
 import com.obabichev.kodama.tests.schema.Users
 import com.obabichev.kodama.tests.schema.UserOrders

@@ -101,3 +101,69 @@ fun <E : Any, FK : Any> EntityTable<*>.manyToOne(
     registerManyToOne(relationship)
     return relationship
 }
+
+/**
+ * Define a many-to-many relationship on an EntityTable.
+ *
+ * This function creates a relationship where many entities (source) can be related to many entities (target)
+ * through a junction table. The junction table holds foreign keys to both sides of the relationship.
+ *
+ * Usage:
+ * ```kotlin
+ * object Users : EntityTable<User>("users") {
+ *     val id = integer("id").primaryKey()
+ *     val name = varchar("name", 255)
+ *
+ *     init {
+ *         manyToMany(
+ *             name = "roles",
+ *             targetTable = Roles,
+ *             junctionTable = UserRoles,
+ *             sourceForeignKeyColumn = UserRoles.userId,
+ *             targetForeignKeyColumn = UserRoles.roleId,
+ *             sourcePrimaryKeyColumn = this.id,
+ *             targetPrimaryKeyColumn = Roles.id
+ *         )
+ *     }
+ * }
+ * ```
+ *
+ * This will generate an extension method:
+ * ```kotlin
+ * fun User.roles(session: EntitySession): List<Role>
+ * ```
+ *
+ * @param E Entity type of the target side
+ * @param SourceFK Foreign key type pointing to source (must match source primary key type)
+ * @param TargetFK Foreign key type pointing to target (must match target primary key type)
+ * @param name Relationship name (used for generated accessor method)
+ * @param targetTable The target EntityTable (the other "many" side)
+ * @param junctionTable The junction table that links both entities
+ * @param sourceForeignKeyColumn Column in junction table that references source table
+ * @param targetForeignKeyColumn Column in junction table that references target table
+ * @param sourcePrimaryKeyColumn Primary key column in source table
+ * @param targetPrimaryKeyColumn Primary key column in target table
+ * @return The created relationship metadata
+ */
+fun <E : Any, SourceFK : Any, TargetFK : Any> EntityTable<*>.manyToMany(
+    name: String,
+    targetTable: EntityTable<E>,
+    junctionTable: EntityTable<*>,
+    sourceForeignKeyColumn: Column<SourceFK>,
+    targetForeignKeyColumn: Column<TargetFK>,
+    sourcePrimaryKeyColumn: Column<SourceFK>,
+    targetPrimaryKeyColumn: Column<TargetFK>
+): ManyToManyRelationship<E, SourceFK, TargetFK> {
+    val relationship = ManyToManyRelationship(
+        name = name,
+        targetTable = targetTable,
+        junctionTable = junctionTable,
+        sourceForeignKeyColumn = sourceForeignKeyColumn,
+        targetForeignKeyColumn = targetForeignKeyColumn,
+        sourcePrimaryKeyColumn = sourcePrimaryKeyColumn,
+        targetPrimaryKeyColumn = targetPrimaryKeyColumn
+    )
+
+    registerManyToMany(relationship)
+    return relationship
+}

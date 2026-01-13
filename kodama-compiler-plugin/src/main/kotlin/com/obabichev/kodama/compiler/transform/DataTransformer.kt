@@ -59,6 +59,7 @@ class DataTransformer(
         val subqueryTables = subqueries.map { subquery ->
             TableInfo(
                 name = subquery.name,
+                packageName = generatedPackage,  // Subqueries are in generated package
                 sqlTableName = subquery.sqlAlias,
                 columns = subquery.columns.map { col ->
                     ColumnInfo(
@@ -95,6 +96,7 @@ class DataTransformer(
             val columns = transformColumns(metadata)
             TableInfo(
                 name = tableName,
+                packageName = metadata["packageName"] as? String ?: "",  // Extract packageName
                 sqlTableName = metadata["sqlTableName"] as? String ?: tableName.lowercase(),
                 columns = columns
             )
