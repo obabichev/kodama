@@ -3,6 +3,10 @@ package com.obabichev.kodama.compiler
 import com.obabichev.kodama.compiler.metadata.KspMetadataLoader
 import com.obabichev.kodama.compiler.metadata.RuntimeMetadataExtractor
 import com.obabichev.kodama.compiler.metadata.TableMetadata
+import com.obabichev.kodama.compiler.parser.ASTQueryDiscoveryIntegration
+import com.obabichev.kodama.compiler.parser.DiscoveredMarkers
+import com.obabichev.kodama.compiler.parser.QueryOperation
+import com.obabichev.kodama.compiler.parser.SubqueryPattern
 import com.obabichev.kodama.compiler.util.toSnakeCase
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -26,6 +30,16 @@ internal data class SubqueryColumnInfo(
     val kotlinType: String,
     val isNullable: Boolean = false,  // True if the column can be null
     val isMarkerBased: Boolean = false  // True if this column uses a marker interface (like MyAlias)
+)
+
+/**
+ * Represents a subquery that can be joined in queries.
+ */
+internal data class SubqueryInfo(
+    val name: String,            // PascalCase name (e.g., "ExpensiveOrders")
+    val sqlAlias: String,        // snake_case alias (e.g., "expensive_orders")
+    val columns: List<SubqueryColumnInfo>,  // List of column information
+    val sourceTables: List<String> = emptyList()  // Tables involved in this subquery (e.g., ["Order"])
 )
 
 /**
@@ -297,1003 +311,149 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
             }
         }
 
-        // NEW: Discover subquery patterns from test files FIRST
-        // Maps subquery name (PascalCase) to SubqueryInfo
-        data class SubqueryInfo(
-            val name: String,            // PascalCase name (e.g., "ExpensiveOrders")
-            val sqlAlias: String,        // snake_case alias (e.g., "expensive_orders")
-            val columns: List<SubqueryColumnInfo>,  // List of column information
-            val sourceTables: List<String> = emptyList()  // Tables involved in this subquery (e.g., ["Order"])
-        )
-
-        // Subquery selection pattern - represents a specific combination of columns/aliases selected in a subquery
-        data class SubquerySelectionPattern(
-            val tables: List<String>,  // e.g., ["Order"]
-            val selectedColumns: Set<String>,  // e.g., ["userName"] - just column names, not table.column
-            val selectedAliases: Set<String>   // e.g., ["MyAlias"] - marker interface names
-        ) {
-            fun toBuilderClassName(): String {
-                val tablesPart = tables.joinToString("_")
-                val columnsPart = selectedColumns.sorted().joinToString("_") { it.replaceFirstChar { c -> c.uppercase() } }
-                val aliasesPart = selectedAliases.sorted().joinToString("_")
-
-                return if (columnsPart.isEmpty() && aliasesPart.isEmpty()) {
-                    "AfterFromQueryBuilder_$tablesPart"
-                } else if (aliasesPart.isEmpty()) {
-                    "AfterFromQueryBuilder_${tablesPart}_$columnsPart"
-                } else if (columnsPart.isEmpty()) {
-                    "AfterFromQueryBuilder_${tablesPart}_$aliasesPart"
-                } else {
-                    "AfterFromQueryBuilder_${tablesPart}_${columnsPart}_$aliasesPart"
-                }
-            }
-
-            fun matches(subquery: SubqueryInfo): Boolean {
-                // Check if tables match
-                if (tables.toSet() != subquery.sourceTables.toSet()) return false
-
-                // Extract column names and alias marker names from subquery
-                val subqueryColumns = subquery.columns
-                    .filter { !it.isMarkerBased }
-                    .map { it.propertyName }
-                    .toSet()
-                val subqueryAliases = subquery.columns
-                    .filter { it.isMarkerBased }
-                    .map { it.propertyName.replaceFirstChar { c -> c.uppercase() } } // Convert myAlias -> MyAlias
-                    .toSet()
-
-                return selectedColumns == subqueryColumns && selectedAliases == subqueryAliases
-            }
-        }
-
-        val subqueries = mutableMapOf<String, SubqueryInfo>()
-        val subqueryPatterns = mutableMapOf<SubquerySelectionPattern, MutableList<String>>()  // Pattern -> List of subquery names
-
-        // Helper function to determine SQL alias style from expression code
-        fun inferSqlAliasStyle(expressionCode: String): String {
-            return when {
-                // Aggregates use camelCase
-                expressionCode.contains("count(") -> "CAMEL_CASE"
-                expressionCode.contains("sum(") -> "CAMEL_CASE"
-                expressionCode.contains("avg(") -> "CAMEL_CASE"
-                expressionCode.contains("min(") -> "CAMEL_CASE"
-                expressionCode.contains("max(") -> "CAMEL_CASE"
-                // Boolean expressions use snake_case (treated like columns)
-                expressionCode.contains(" eq ") || expressionCode.contains(" neq ") ||
-                expressionCode.contains(" and ") || expressionCode.contains(" or ") ||
-                expressionCode.contains(" gt ") || expressionCode.contains(" lt ") ||
-                expressionCode.contains(" gte ") || expressionCode.contains(" lte ") -> "SNAKE_CASE"
-                // Column references use snake_case
-                else -> "SNAKE_CASE"
-            }
-        }
-
-        // Helper function to determine expression type from code
-        fun inferExpressionType(expressionCode: String): String {
-            return when {
-                expressionCode.contains("count(") -> "Long"
-                expressionCode.contains("sum(") -> "Number"
-                expressionCode.contains("avg(") -> "Double"
-                expressionCode.contains("min(") -> "Number"
-                expressionCode.contains("max(") -> "Number"
-                // For boolean expressions
-                expressionCode.contains(" eq ") || expressionCode.contains(" neq ") ||
-                expressionCode.contains(" and ") || expressionCode.contains(" or ") ||
-                expressionCode.contains(" gt ") || expressionCode.contains(" lt ") ||
-                expressionCode.contains(" gte ") || expressionCode.contains(" lte ") -> "Boolean"
-                else -> {
-                    // Try to parse column reference like "person.name" or "order.cost"
-                    val columnRefPattern = """([a-z]\w*)\.([a-z]\w*)""".toRegex()
-                    val match = columnRefPattern.find(expressionCode.trim())
-
-                    if (match != null) {
-                        val tableAccessor = match.groupValues[1]  // e.g., "person"
-                        val columnProperty = match.groupValues[2]  // e.g., "name"
-
-                        // Convert accessor to table name (person -> Person)
-                        val tableName = tableAccessor.replaceFirstChar { it.uppercase() }
-
-                        // Look up the table in metadata
-                        val tableMetadata = kspTableMetadata.find { it.name == tableName }
-                        if (tableMetadata != null) {
-                            // Look up the column
-                            val columnMetadata = tableMetadata.columns.find { it.propertyName == columnProperty }
-                            if (columnMetadata != null) {
-                                // Return the actual column type
-                                return if (columnMetadata.isNullable) {
-                                    "${columnMetadata.kotlinType}?"
-                                } else {
-                                    columnMetadata.kotlinType
-                                }
-                            }
-                        }
-                    }
-
-                    // Fallback
-                    "Any?"
-                }
-            }
-        }
-
-        // FIRST: Detect column markers vs subquery markers, and their types
-        // We need to do this BEFORE scanning for subqueries
+        // ==============================================
+        // AST-BASED QUERY DISCOVERY
+        // ==============================================
         val testKtFiles = testFiles.files.filter { it.extension == "kt" }.toList()
-        val usedColumnMarkers = mutableSetOf<String>()
-        val markerTypes = mutableMapOf<String, String>()  // Map marker name to inferred type
-        val markerAliasStyles = mutableMapOf<String, String>()  // Map marker name to SQL alias style
-        val markerTableUsage = mutableMapOf<String, MutableSet<Set<String>>>()  // Map marker to set of table combinations
 
-        testKtFiles.forEach { file ->
-            val content = file.readText()
+        logger.lifecycle("=".repeat(70))
+        logger.lifecycle("Kodama AST Parser: Starting query discovery")
+        logger.lifecycle("=".repeat(70))
 
-            // === REGEX USAGE: Pattern Discovery ===
-            // The following regex patterns are used for PATTERN DISCOVERY, which is an appropriate use case.
-            // We're mining test files to find usage patterns (from/join/select combinations).
-            // Alternative: Full Kotlin AST parsing would be overkill and slower for this purpose.
-            // These patterns don't parse structured data - they discover usage patterns.
-            // See REGEX_ELIMINATION_PLAN.md for guidelines on when regex is appropriate.
+        // Declare variables outside try block so they're accessible later
+        var astMarkers: DiscoveredMarkers
+        var astSubqueries: List<SubqueryPattern>
+        var astCombinations: Set<List<String>>
 
-            // Find all query chains with their markers
-            // Pattern: from(Table1).join(Table2)....selectAliased(Marker) { ... }
-            val queryWithMarkerPattern = """from\s*\(\s*([A-Z]\w+)\s*\)((?:\s*\.(?:join|leftJoin|joinAliased|leftJoinAliased)\s*\([^)]*\)(?:\s*\{[^}]*\})?)*)((?:\s*\.select(?:All|Aliased)?[^.]*)*)\s*\.selectAliased\s*\(\s*([A-Z]\w+)\s*\)""".toRegex()
+        try {
+            val astIntegration = ASTQueryDiscoveryIntegration(logger)
 
-            queryWithMarkerPattern.findAll(content).forEach { match ->
-                val fromTable = match.groupValues[1]
-                val joinChain = match.groupValues[2]
-                val markerName = match.groupValues[4]
+            // Discover table combinations using AST
+            astCombinations = astIntegration.discoverTableCombinations(testKtFiles)
 
-                // Extract all tables from the join chain
-                val tables = mutableSetOf(fromTable)
-                val joinPattern = """\.(?:join|leftJoin|joinAliased|leftJoinAliased)\s*\(\s*([A-Z]\w+)""".toRegex()
-                joinPattern.findAll(joinChain).forEach { joinMatch ->
-                    tables.add(joinMatch.groupValues[1])
-                }
-
-                // Track this marker + table combination
-                usedColumnMarkers.add(markerName)
-                markerTableUsage.getOrPut(markerName) { mutableSetOf() }.add(tables)
+            logger.lifecycle("✅ AST Parser: Discovered ${astCombinations.size} table combinations")
+            astCombinations.take(10).forEach { combination ->
+                logger.info("  - ${combination.joinToString(" → ")}")
+            }
+            if (astCombinations.size > 10) {
+                logger.info("  ... and ${astCombinations.size - 10} more")
             }
 
-            // Also scan inside fromAliased/joinAliased subquery blocks
-            // Pattern: fromAliased(SubqueryMarker) { from(Table)...selectAliased(Marker) { ... } }
-            val subqueryWithMarkerPattern = """(?:fromAliased|joinAliased|leftJoinAliased)\s*\([A-Z]\w+\)\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}""".toRegex()
+            // Discover markers using AST
+            astMarkers = astIntegration.discoverColumnMarkers(testKtFiles)
 
-            subqueryWithMarkerPattern.findAll(content).forEach { subMatch ->
-                val subqueryBody = subMatch.groupValues[1]
-
-                // Simplified pattern: just look for from(Table) and selectAliased(Marker) in the subquery body
-                // We don't need to be strict about what's in between
-                val innerFromPattern = """from\s*\(\s*([A-Z]\w+)\s*\)""".toRegex()
-                val innerMarkerPattern = """\.selectAliased\s*\(\s*([A-Z]\w+)\s*\)""".toRegex()
-
-                val fromMatch = innerFromPattern.find(subqueryBody)
-                val markerMatches = innerMarkerPattern.findAll(subqueryBody)
-
-                if (fromMatch != null) {
-                    val fromTable = fromMatch.groupValues[1]
-                    val tables = mutableSetOf(fromTable)
-
-                    // Also look for any joins in the subquery
-                    val joinPattern = """\.(?:join|leftJoin)\s*\(\s*([A-Z]\w+)""".toRegex()
-                    joinPattern.findAll(subqueryBody).forEach { joinMatch ->
-                        tables.add(joinMatch.groupValues[1])
-                    }
-
-                    // Track each marker found with these tables
-                    markerMatches.forEach { markerMatch ->
-                        val markerName = markerMatch.groupValues[1]
-                        usedColumnMarkers.add(markerName)
-                        markerTableUsage.getOrPut(markerName) { mutableSetOf() }.add(tables)
-                    }
-                }
+            logger.lifecycle("✅ AST Parser: Discovered ${astMarkers.markerTypes.size} column markers")
+            astMarkers.markerTypes.entries.take(5).forEach { (marker, type) ->
+                logger.info("  - $marker: $type")
+            }
+            if (astMarkers.markerTypes.size > 5) {
+                logger.info("  ... and ${astMarkers.markerTypes.size - 5} more")
             }
 
-            // Find column selections with markers: .selectAs(MarkerType) { column }
-            val selectAsPattern = """\.selectAs\(([A-Z]\w+)\)\s*\{\s*([^}]*?)\s*\}""".toRegex()
-            selectAsPattern.findAll(content).forEach { match ->
-                val markerName = match.groupValues[1]
-                val columnCode = match.groupValues[2].trim()
-                // Track that this marker was used (generator will create the marker interface)
-                usedColumnMarkers.add(markerName)
-                // Infer type from column expression
-                markerTypes[markerName] = inferExpressionType(columnCode)
-                // Infer SQL alias style from column expression
-                markerAliasStyles[markerName] = inferSqlAliasStyle(columnCode)
+            // Discover subqueries using AST
+            astSubqueries = astIntegration.discoverSubqueries(testKtFiles)
+
+            logger.lifecycle("✅ AST Parser: Discovered ${astSubqueries.size} subqueries")
+            astSubqueries.take(5).forEach { subquery ->
+                logger.info("  - ${subquery.alias} (base: ${subquery.getBaseTable()})")
             }
+            if (astSubqueries.size > 5) {
+                logger.info("  ... and ${astSubqueries.size - 5} more")
+            }
+
+            logger.lifecycle("=".repeat(70))
+            logger.lifecycle("AST Parser discovery complete - using AST data for code generation")
+            logger.lifecycle("=".repeat(70))
+
+        } catch (e: Exception) {
+            logger.warn("⚠️ AST Parser encountered an error - using empty defaults:")
+            logger.warn("   ${e.message}")
+            logger.info("   Full stack trace:", e)
+            // Provide fallback empty data
+            astMarkers = DiscoveredMarkers(emptyMap(), emptyMap(), emptyMap())
+            astSubqueries = emptyList()
+            astCombinations = emptySet()
         }
 
-        // NOW: Scan test files for subquery patterns
-        // Track potential matches per subquery name to handle nested cases
-        val potentialMatches = mutableMapOf<String, MutableList<Pair<String, String>>>()  // name -> list of (body, fullMatch)
-
-        testKtFiles.forEach { file ->
-            val content = file.readText()
-
-            // NEW PATTERN 1: Match fromAliased(MarkerType) { from()... } or .joinAliased(MarkerType) { from()... }
-            // This is the new consistent API with marker token parameters
-            // Match both top-level function calls (no dot) and method calls (with dot)
-            val fromAliasedPattern = """(?:^|[^\w.])(fromAliased|joinAliased|leftJoinAliased)\(([A-Z]\w+)\)\s*\{\s*from\(([\s\S]*?)\n\s*\}""".toRegex(RegexOption.MULTILINE)
-            fromAliasedPattern.findAll(content).forEach { match ->
-                val subqueryName = match.groupValues[2]  // e.g., "UserTotalsNew"
-                val subqueryBody = match.groupValues[3]  // The query builder code after from()
-
-                // Skip if this is a column alias marker
-                if (usedColumnMarkers.contains(subqueryName)) {
-                    return@forEach
-                }
-
-                // Store this potential match
-                potentialMatches.getOrPut(subqueryName) { mutableListOf() }.add(subqueryBody to content)
-            }
-
-            // OLD PATTERN: Match .aliasAs<MarkerName>() syntax (without .build())
-            // To handle nested queries, we need to find ALL from() positions and try matching from each
-            // Match aliasAs that's followed by ")" to ensure it's the subquery alias, not a column alias
-            val fromPattern = """from\(""".toRegex()
-            val aliasAsPattern = """([\s\S]*?)\.aliasAs<([A-Z][a-zA-Z0-9]*)>\(\)\)""".toRegex()  // Note the trailing ")" to match end of from() call
-
-            // Find all from() positions
-            fromPattern.findAll(content).forEach { fromMatch ->
-                val startPos = fromMatch.range.last + 1  // Position after "from("
-                val remainingContent = content.substring(startPos)
-
-                // Try to match aliasAs pattern from this position
-                val aliasMatch = aliasAsPattern.find(remainingContent)
-                if (aliasMatch != null) {
-                    val subqueryBody = aliasMatch.groupValues[1]  // The query builder code
-                    val subqueryName = aliasMatch.groupValues[2]  // e.g., "UserTotalsNew"
-
-                    // Skip if this is a column alias marker (used inside selectAliased blocks)
-                    // Column markers are already detected separately
-                    if (usedColumnMarkers.contains(subqueryName)) {
-                        return@forEach
-                    }
-
-                    // Store this potential match
-                    potentialMatches.getOrPut(subqueryName) { mutableListOf() }.add(subqueryBody to content)
-                }
-            }
-        }
-
-        // For each subquery name, take the match with the shortest body (innermost definition)
-        potentialMatches.forEach { (subqueryName, matches) ->
-            val (subqueryBody, _) = matches.minByOrNull { it.first.length } ?: return@forEach
-
-            // Convert PascalCase to snake_case for SQL alias
-            val sqlAlias = subqueryName.toSnakeCase()
-
-            // Extract columns from the subquery
-            val columns = mutableListOf<SubqueryColumnInfo>()
-
-            // Look for .select { column } patterns
-            val selectColumnPattern = """\.select\s*\{\s*(\w+)\.(\w+)\s*\}""".toRegex()
-            selectColumnPattern.findAll(subqueryBody).forEach { colMatch ->
-                val tableRef = colMatch.groupValues[1]
-                val propertyName = colMatch.groupValues[2]  // Kotlin property name
-                val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef
-
-                // Get SQL column name for SQL generation
-                val sqlNames = tableToPropertySqlNames[tableName] ?: emptyMap()
-                val sqlColumnName = sqlNames[propertyName] ?: propertyName
-
-                // Get the column type and nullability from the table definition
-                val columnTypes = tableToPropertyTypes[tableName] ?: emptyMap()
-                val columnNullability = tableToPropertyNullability[tableName] ?: emptyMap()
-                val kotlinType = columnTypes[propertyName] ?: "Any"
-                val isNullable = columnNullability[propertyName] ?: true
-
-                columns.add(SubqueryColumnInfo(propertyName, sqlColumnName, kotlinType, isNullable))
-            }
-
-            // Look for .selectAs(MarkerName) { ... } patterns (unified marker-based API)
-            val selectAsPattern = """\.selectAs\(([A-Z]\w+)\)\s*\{([^}]+)\}""".toRegex()
-            selectAsPattern.findAll(subqueryBody).forEach { aliasMatch ->
-                val markerName = aliasMatch.groupValues[1]  // PascalCase marker like "MyAlias"
-                val expressionBody = aliasMatch.groupValues[2].trim()  // Expression inside lambda
-
-                // Convert marker name to camelCase for property accessor (MyAlias -> myAlias)
-                val propertyName = markerName.replaceFirstChar { it.lowercase() }
-                // Always use snake_case for SQL column names (matches TypedQueryBuilder behavior)
-                // MyAlias -> myAlias -> my_alias
-                val sqlAlias = propertyName.toSnakeCase()
-
-                // Try to extract source column from aggregate expression like "sum(order.cost)"
-                val aggregateColumnPattern = """(sum|count|avg|min|max)\s*\(\s*(\w+)\.(\w+)\s*\)""".toRegex()
-                val aggMatch = aggregateColumnPattern.find(expressionBody)
-
-                val (kotlinType, isNullable) = if (aggMatch != null) {
-                    val aggregateFunction = aggMatch.groupValues[1]
-                    val tableRef = aggMatch.groupValues[2]
-                    val columnName = aggMatch.groupValues[3]
-                    val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef
-
-                    // Infer type from aggregate function
-                    // Note: All aggregates are kept nullable because subqueries can be used
-                    // in LEFT JOINs where values can be NULL even when source is non-nullable
-                    val inferredType = when (aggregateFunction) {
-                        "count" -> "Long"
-                        "sum" -> "Long"  // SUM of integers returns Long
-                        "avg" -> "Double"
-                        "min", "max" -> {
-                            // MIN/MAX preserve source column type
-                            val columnTypes = tableToPropertyTypes[tableName] ?: emptyMap()
-                            columnTypes[columnName] ?: "Long"
-                        }
-                        else -> "Long"
-                    }
-
-                    // All aggregates are nullable for LEFT JOIN safety
-                    Pair(inferredType, true)
-                } else if (expressionBody.contains("countAll()")) {
-                    // countAll() is nullable for LEFT JOIN safety
-                    Pair("Long", true)
-                } else {
-                    // Try to match simple column reference like "order.userName"
-                    val columnRefPattern = """(\w+)\.(\w+)""".toRegex()
-                    val colMatch = columnRefPattern.find(expressionBody)
-
-                    if (colMatch != null) {
-                        val tableRef = colMatch.groupValues[1]
-                        val columnName = colMatch.groupValues[2]
-                        val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef
-
-                        // Look up actual column type from table definition
-                        val columnTypes = tableToPropertyTypes[tableName] ?: emptyMap()
-                        val sourceType = columnTypes[columnName] ?: "String"
-
-                        // Check if source column is nullable
-                        val columnNullability = tableToPropertyNullability[tableName] ?: emptyMap()
-                        val sourceIsNullable = columnNullability[columnName] ?: false
-
-                        // Subquery columns are always nullable for LEFT JOIN safety
-                        Pair(sourceType, true)
-                    } else {
-                        // Fallback for unknown expressions - nullable for safety
-                        Pair("Long", true)
-                    }
-                }
-
-                // Mark as marker-based so we don't generate phantom type interface
-                columns.add(SubqueryColumnInfo(propertyName, sqlAlias, kotlinType, isNullable, isMarkerBased = true))
-            }
-
-            // Look for .selectAll(Table) patterns
-            val selectAllPattern = """\.selectAll\s*\(\s*([A-Z]\w+)\s*\)""".toRegex()
-            selectAllPattern.findAll(subqueryBody).forEach { allMatch ->
-                val tableName = allMatch.groupValues[1]
-                val properties = tableToProperties[tableName] ?: emptyList()
-                properties.forEach { propName ->
-                    val sqlNames = tableToPropertySqlNames[tableName] ?: emptyMap()
-                    val sqlColumnName = sqlNames[propName] ?: propName
-                    val columnTypes = tableToPropertyTypes[tableName] ?: emptyMap()
-                    val columnNullability = tableToPropertyNullability[tableName] ?: emptyMap()
-                    val kotlinType = columnTypes[propName] ?: "Any"
-                    val isNullable = columnNullability[propName] ?: true
-                    columns.add(SubqueryColumnInfo(propName, sqlColumnName, kotlinType, isNullable))
-                }
-            }
-
-            // Extract source tables from .from(TableName) patterns
-            // Only take the FIRST .from() call to get the immediate source table
-            // This avoids capturing tables from nested subqueries
-            val fromPattern = """\.from\(([A-Z]\w+)\)""".toRegex()
-            val firstFrom = fromPattern.find(subqueryBody)
-            val sourceTables = if (firstFrom != null) {
-                listOf(firstFrom.groupValues[1])
-            } else {
-                emptyList()
-            }
-
-            // Deduplicate columns by property name (can happen if patterns match overlapping text)
-            val uniqueColumns = columns.distinctBy { it.propertyName }
-            subqueries[subqueryName] = SubqueryInfo(subqueryName, sqlAlias, uniqueColumns, sourceTables)
-        }
-
-        // Extract selection patterns from discovered subqueries
-        subqueries.values.forEach { subqueryInfo ->
-            if (subqueryInfo.sourceTables.isNotEmpty()) {
-                // Extract column names (non-marker-based columns)
-                val columns = subqueryInfo.columns
-                    .filter { !it.isMarkerBased }
-                    .map { it.propertyName }
-                    .toSet()
-
-                // Extract alias marker names (marker-based columns, convert to PascalCase)
-                val aliases = subqueryInfo.columns
-                    .filter { it.isMarkerBased }
-                    .map { it.propertyName.replaceFirstChar { c -> c.uppercase() } }  // myAlias -> MyAlias
-                    .toSet()
-
-                val pattern = SubquerySelectionPattern(
-                    tables = subqueryInfo.sourceTables,
-                    selectedColumns = columns,
-                    selectedAliases = aliases
-                )
-
-                // Group subqueries by pattern
-                subqueryPatterns.getOrPut(pattern) { mutableListOf() }.add(subqueryInfo.name)
-            }
-        }
-
-        println("Identified ${subqueryPatterns.size} unique selection patterns:")
-        subqueryPatterns.forEach { (pattern, subqueryNames) ->
-            println("  ${pattern.toBuilderClassName()} -> subqueries: ${subqueryNames.joinToString(", ")}")
-        }
-
-        println("Found ${subqueries.size} subquery definitions: ${subqueries.keys.joinToString(", ")}")
-
-        // Scan for selection marker interfaces (empty interfaces for selectAs<T>)
-        val selectionMarkers = mutableSetOf<SelectionMarkerInfo>()
-
-        // Helper to convert interface name to property name (TotalCost -> totalCost)
-        fun interfaceNameToPropertyName(interfaceName: String): String {
-            return interfaceName.replaceFirstChar { it.lowercase() }
-        }
-
-        // Load markers from KSP metadata (primary source)
-        val metadataLoader = KspMetadataLoader()
-        val kspMetadataPath = kspMetadataFile.get().asFile
-
-        if (kspMetadataPath.exists()) {
-            try {
-                val kspMarkers = metadataLoader.loadMarkers(kspMetadataPath)
-                kspMarkers.forEach { marker ->
-                    val propertyName = interfaceNameToPropertyName(marker.name)
-                    // Avoid conflicts with table names
-                    if (!tables.contains(marker.name)) {
-                        val type = markerTypes[marker.name] ?: "Number"
-                        val aliasStyle = markerAliasStyles[marker.name] ?: "SNAKE_CASE"
-                        selectionMarkers.add(
-                            SelectionMarkerInfo(
-                                marker.name,
-                                propertyName,
-                                marker.packageName,
-                                type,
-                                aliasStyle
-                            )
-                        )
-                    }
-                }
-                logger.info("Kodama: Loaded ${kspMarkers.size} marker(s) from KSP metadata")
-            } catch (e: Exception) {
-                logger.warn("Kodama: Failed to load markers from KSP metadata: ${e.message}")
-            }
-        }
-
-        // === REGEX USAGE: Fallback for Test Sources ===
-        // Fallback: Regex-based discovery for test sources (KSP might not process test code)
-        // This ensures backward compatibility and handles markers defined in test files
-        // Justified because:
-        // 1. KSP may not process test sources depending on configuration
-        // 2. Provides backward compatibility for projects without @Marker annotation
-        // 3. Pattern discovery (finding interface declarations) is an appropriate use of regex
-        val allSourceFiles = (schemaKtFiles.toList() + testKtFiles.toList()).asSequence()
-        allSourceFiles.forEach { file ->
-            val content = file.readText()
-
-            // Extract package name from file (lightweight, no need for full parsing)
-            val packagePattern = """package\s+([\w.]+)""".toRegex()
-            val packageName = packagePattern.find(content)?.groupValues?.get(1) ?: genPkg
-
-            // Match empty interfaces: interface XxxYyy with no body or empty body
-            // This regex discovers interface declarations - pattern discovery use case
-            val markerPattern = """(?:^|\n)\s*interface\s+([A-Z]\w+)(?:\s*:\s*[\w.]+)?(?:\s*\{\s*\}|\s*(?=\n|$))""".toRegex()
-            markerPattern.findAll(content).forEach { match ->
-                val interfaceName = match.groupValues[1]
-
-                // Skip if already discovered by KSP
-                if (selectionMarkers.any { it.interfaceName == interfaceName }) {
-                    return@forEach
-                }
-
-                val propertyName = interfaceNameToPropertyName(interfaceName)
-
-                // Avoid conflicts with table names
-                if (!tables.contains(interfaceName)) {
-                    val type = markerTypes[interfaceName] ?: "Number"
-                    val aliasStyle = markerAliasStyles[interfaceName] ?: "SNAKE_CASE"
-                    selectionMarkers.add(SelectionMarkerInfo(interfaceName, propertyName, packageName, type, aliasStyle))
-                }
-            }
-        }
-
-        println("Found ${selectionMarkers.size} selection marker interfaces: ${selectionMarkers.map { it.interfaceName }.joinToString(", ")}")
-
-        // Scan for actual usage of .aliasAs<MarkerInterface>() in queries
-        // Column markers were already detected earlier, now find subquery markers
-        val usedSubqueryMarkers = mutableSetOf<String>()
-
-        testKtFiles.forEach { file ->
-            val content = file.readText()
-
-            // Find ALL .aliasAs<T>() usages
-            val allAliasPattern = """\.aliasAs<([A-Z]\w+)>\(\)""".toRegex()
-            allAliasPattern.findAll(content).forEach { match ->
-                val markerName = match.groupValues[1]
-                // If not a column marker, it must be a subquery marker
-                if (!usedColumnMarkers.contains(markerName)) {
-                    usedSubqueryMarkers.add(markerName)
-                }
-            }
-        }
-
-        // Selection markers should only include column aliases, not subquery aliases
-        val usedMarkers = usedColumnMarkers
-
-        // Identify markers that are used but not defined - we'll generate them
-        val existingMarkerNames = selectionMarkers.map { it.interfaceName }.toSet()
-        val missingMarkerNames = usedMarkers - existingMarkerNames
-
-        // Add missing markers to selectionMarkers set (they'll be generated in the output)
-        missingMarkerNames.forEach { markerName ->
-            val propertyName = interfaceNameToPropertyName(markerName)
-            val type = markerTypes[markerName] ?: "Number"
-            val aliasStyle = markerAliasStyles[markerName] ?: "SNAKE_CASE"
-            selectionMarkers.add(SelectionMarkerInfo(markerName, propertyName, genPkg, type, aliasStyle))
-        }
-
-        if (missingMarkerNames.isNotEmpty()) {
-            println("Auto-generating ${missingMarkerNames.size} marker interfaces: ${missingMarkerNames.joinToString(", ")}")
-        }
-
-        // Filter to only markers that are actually used in queries
-        val activeMarkers = selectionMarkers.filter { usedMarkers.contains(it.interfaceName) }.toSet()
-        println("Found ${activeMarkers.size} actively used markers: ${activeMarkers.map { it.interfaceName }.joinToString(", ")}")
-
-        // NEW: Discover marker combinations (which markers appear together in same query)
-        val markerCombinations = mutableSetOf<List<String>>()  // Each list is markers in one query, in order
-
-        testKtFiles.forEach { file ->
-            val content = file.readText()
-
-            // Find all query chains with selectAs calls
-            // Pattern: from(Table).selectAs(M1) { ... }.selectAs(M2) { ... }...
-            // We look for query starting from "from" and ending at execute/build
-            val queryChainPattern = """(from\s*\([^)]+\)(?:(?!from\s*\()[^;])+?)(?:\.execute\(|\.build\(\)|\n\s*\})""".toRegex()
-
-            queryChainPattern.findAll(content).forEach { queryMatch ->
-                val queryChain = queryMatch.groupValues[1]
-
-                // Find all selectAs markers in this query chain (in order)
-                val selectAsPattern = """\.selectAs\(([A-Z]\w+)\)""".toRegex()
-                val markersInQuery = selectAsPattern.findAll(queryChain)
-                    .map { it.groupValues[1] }
-                    .toList()
-
-                // Only track if there are markers
-                if (markersInQuery.isNotEmpty()) {
-                    markerCombinations.add(markersInQuery)
-                }
-            }
-        }
-
-        println("Found ${markerCombinations.size} unique marker combinations:")
-        markerCombinations.forEach { combo ->
-            println("  - ${combo.joinToString(" + ")}")
-        }
-
-        // Add detected subquery markers to subqueries map if they don't exist
-        // This handles custom marker names like UserTotalSubquery that aren't from old subquery_X {} patterns
-        val newSubqueryMarkers = usedSubqueryMarkers - subqueries.keys
-        if (newSubqueryMarkers.isNotEmpty() && subqueries.isNotEmpty()) {
-            // Use an existing subquery as a template for columns/tables
-            val template = subqueries.values.first()
-            newSubqueryMarkers.forEach { markerName ->
-                val newSubquery = SubqueryInfo(
-                    markerName,
-                    markerName.toSnakeCase(),
-                    template.columns,
-                    template.sourceTables
-                )
-                subqueries[markerName] = newSubquery
-
-                // Also add to selection patterns
-                val columns = newSubquery.columns
-                    .filter { !it.isMarkerBased }
-                    .map { it.propertyName }
-                    .toSet()
-                val aliases = newSubquery.columns
-                    .filter { it.isMarkerBased }
-                    .map { it.propertyName.replaceFirstChar { c -> c.uppercase() } }
-                    .toSet()
-                val pattern = SubquerySelectionPattern(
-                    tables = newSubquery.sourceTables,
-                    selectedColumns = columns,
-                    selectedAliases = aliases
-                )
-                subqueryPatterns.getOrPut(pattern) { mutableListOf() }.add(markerName)
-            }
-            println("Added ${newSubqueryMarkers.size} custom subquery markers: ${newSubqueryMarkers.joinToString(", ")}")
-        }
-
-        // Discover query combinations from test files
-        // Use List instead of Set to allow duplicates with different join patterns
-        // Deduplication will happen later in DataTransformer using both tables AND join pattern
+        // ==============================================
+        // EXTRACT DATA FROM AST DISCOVERY
+        // ==============================================
+
+        // Extract marker data from AST discovery
+        val usedColumnMarkers = astMarkers.markerTypes.keys.toMutableSet()
+        val markerTypes = astMarkers.markerTypes.toMutableMap()
+        val markerAliasStyles = astMarkers.markerAliasStyles.toMutableMap()
+        val markerTableUsage = astMarkers.markerTableUsage.toMutableMap()
+
+        logger.lifecycle("Kodama: Using AST-discovered markers (zero regex!)")
+        logger.lifecycle("  - Markers: ${usedColumnMarkers.size}")
+        logger.lifecycle("  - Types inferred: ${markerTypes.size}")
+
+        // Extract subquery data from AST discovery
+        val subqueriesFromAST = astSubqueries.associateBy { it.alias }
+        logger.lifecycle("  - Subqueries: ${subqueriesFromAST.size}")
+
+        // ==============================================
+        // CONVERT AST DATA TO GENERATOR FORMAT
+        // ==============================================
+
+        // Selection patterns and query combinations
         val queryCombinations = mutableListOf<List<String>>()
-
-        // NEW: Track join types for each table in each combination
-        // Maps combination key (e.g., "Person_Order") to list of (tableName, joinType)
-        // First table has null join type (it's the base table from `from(...)`)
-        // Example: "Person_Order" -> [("Person", null), ("Order", "INNER")]
-        val combinationJoinTypes = mutableMapOf<String, List<Pair<String, String?>>>()
-
-        // IMPORTANT: Add all single-table combinations first
-        // This ensures Phase 2 generates builders for ALL tables (needed by Phase 1's from() functions)
-        tables.forEach { tableName ->
-            queryCombinations.add(listOf(tableName))  // Use original case to match pattern scanner
-            combinationJoinTypes[tableName] = listOf(tableName to null)  // Single table, no join
-        }
-
-        // Discover selection patterns (which columns are actually selected)
-        // Maps table combination to set of selection patterns
-        // Example: [person, order] -> [["person:All", "order:Product"], ["person:Name", "order:All"]]
         val selectionPatterns = mutableMapOf<List<String>, MutableSet<List<String>>>()
+        val combinationJoinTypes = mutableMapOf<String, List<Pair<String, String?>>>()
+        val subqueries = mutableMapOf<String, SubqueryInfo>()
+        val selectionMarkers = mutableSetOf<SelectionMarkerInfo>()
+        val markerCombinations = mutableSetOf<List<String>>()
 
-        // NOTE: The old SelectionPatternScanner classes have been removed.
-        // Marker discovery is now done directly via regex scanning of test files (see lines 700-780).
+        // Convert AST markers to SelectionMarkerInfo format
+        markerTypes.forEach { (markerName, kotlinType) ->
+            val aliasStyle = markerAliasStyles[markerName] ?: "SNAKE_CASE"
+            val propertyName = markerName.replaceFirstChar { it.lowercase() }  // TotalCost -> totalCost
 
-        // Reuse testFiles from subquery scanning
-        testKtFiles.forEach { file ->
-            var content = file.readText()
-
-            // FIRST: Remove .fromAliased(MarkerType) { query()... } blocks to avoid extracting table combinations from subquery definitions
-            // These subqueries are self-contained and should be treated as single tables, not as combinations of their internal tables
-            val fromAliasedBlockPattern = """\.(fromAliased|joinAliased|leftJoinAliased)\(([A-Z]\w+)\)\s*\{\s*query\(\)([\s\S]*?)\n\s*\}""".toRegex()
-            content = fromAliasedBlockPattern.replace(content) { matchResult ->
-                // Replace with a placeholder that won't match table patterns
-                ".fromAliased_PLACEHOLDER(${matchResult.groupValues[2]})"
-            }
-
-            // SECOND: Scan subquery blocks for table combinations BEFORE removing them
-            val subqueryPattern = """subquery_([A-Z][a-zA-Z0-9]*)\s*\{([\s\S]*?\.build\(\))""".toRegex()
-            subqueryPattern.findAll(content).forEach { match ->
-                val subqueryName = match.groupValues[1]
-                val subqueryBody = match.groupValues[2]  // The query builder code inside subquery INCLUDING .build()
-
-                // CRITICAL: Extract table combinations from subquery bodies
-                // Without this, tables used only in subqueries won't have builders generated
-                val tableRefPattern = """(?:from|join|leftJoin)\s*\(\s*(\w+)""".toRegex()  // Exclude fromAliased/joinAliased
-                val tablesInSubquery = mutableListOf<String>()
-                tableRefPattern.findAll(subqueryBody).forEach { tableMatch ->
-                    val tableRef = tableMatch.groupValues[1]
-                    val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef
-                    // Only add if it's a capitalized table name (real table, not variable)
-                    if (tableRef[0].isUpperCase()) {
-                        tablesInSubquery.add(tableName)
-                    }
-                }
-
-                // Add all prefixes as valid combinations (supports multi-table subqueries)
-                if (tablesInSubquery.isNotEmpty()) {
-                    for (i in 1..tablesInSubquery.size) {
-                        queryCombinations.add(tablesInSubquery.take(i))
-                    }
-                }
-            }
-
-            // Build a map of subquery variable names to subquery types before removing subquery blocks
-            val subqueryVarMap = mutableMapOf<String, String>()  // Maps varName (usersWithOrders) -> SubqueryName (UsersWithOrders)
-            val subqueryVarPattern = """val\s+(\w+)\s*=\s*subquery_([A-Z]\w+)""".toRegex()
-            subqueryVarPattern.findAll(content).forEach { match ->
-                val varName = match.groupValues[1]
-                val subqueryName = match.groupValues[2]
-                subqueryVarMap[varName] = subqueryName
-            }
-
-            // NOW remove subquery definitions to avoid treating them as regular query patterns
-            content = subqueryPattern.replace(content, "")  // Remove subquery blocks
-
-            // ===================================================================
-            // REMOVED: Old test file scanning for table combinations
-            // Now using relationship-based generation instead
-            // ===================================================================
-
-            // Still scan for Table+Subquery combinations (these are explicitly defined)
-            // Detect joinAliased/leftJoinAliased with .aliasAs<Type>() pattern
-            // Matches: from(Table).joinAliased( ... .aliasAs<SubqueryMarker>() ) { condition }
-            val aliasAsJoinPattern = """from\s*\(\s*(\w+)\s*\)[\s\S]*?\.(?:joinAliased|leftJoinAliased)\s*\([\s\S]*?\.aliasAs<(\w+)>\(\)[\s\S]*?\)\s*\{""".toRegex()
-            aliasAsJoinPattern.findAll(content).forEach { match ->
-                val tableName = match.groupValues[1]
-                val subqueryName = match.groupValues[2]
-
-                // Check if the subquery exists
-                if (subqueries.containsKey(subqueryName)) {
-                    // Normalize table name
-                    val normalizedTable = tableNameMap[tableName.lowercase()] ?: tableName
-
-                    // Add the combination: Table + Subquery
-                    val combination = listOf(normalizedTable, subqueryName)
-                    queryCombinations.add(combination)
-
-                    // Also add prefixes (just the table alone)
-                    queryCombinations.add(listOf(normalizedTable))
-                }
-            }
-
-            // NEW: Extract selection patterns
-            // Match lambda-based API: .select { person.name }
-            // Match direct API: .selectAll(Person) or .selectAll(usersWithOrders)
-            // Match aggregate functions: .select { sum(order.cost) alias "total" }
-            val selectLambdaColumnPattern = """\.select\s*\{\s*\+\s*(\w+)\.(\w+)\s*\}""".toRegex()
-            val selectAllDirectPattern = """\.selectAll\s*\(\s*(\w+)\s*\)""".toRegex()  // Match any identifier, not just capitalized
-
-            // Match aggregate patterns (with or without alias)
-            val aggregatePattern = """(sum|count|avg|min|max|countAll)\s*\(\s*(?:(\w+)\.(\w+))?\s*\)(?:\s+alias\s+"(\w+)")?""".toRegex()
-
-            // Find complete query chains with selections
-            // Match both: query()...execute() and query()...build()
-            val executeQueryPattern = """query\s*\(\s*\)(?:(?!\.(?:build|execute)\()[\s\S])*?\.execute\(""".toRegex()
-            val buildQueryPattern = """query\s*\(\s*\)(?:(?!\.(?:build|execute)\()[\s\S])*?\.build\(""".toRegex()
-
-            val executeMatches = executeQueryPattern.findAll(content).map { it to true }.toList()
-            val buildMatches = buildQueryPattern.findAll(content).map { it to false }.toList()
-            val allMatches = executeMatches + buildMatches
-
-            allMatches.forEach { (queryMatch, usesExecute) ->
-                var queryChain = queryMatch.value
-
-                // CRITICAL: Extract subquery marker names BEFORE removing nested inline subqueries
-                // Pattern: query()...aliasAs<MarkerName>()) - note the double )) which closes the subquery AND the join() call
-                val nestedSubqueryPattern = """query\s*\(\s*\)[\s\S]*?\.aliasAs<([A-Z]\w+)>\(\)\)""".toRegex()
-                val inlineSubqueryNames = mutableListOf<String>()
-                nestedSubqueryPattern.findAll(queryChain).forEach { match ->
-                    val subqueryName = match.groupValues[1]
-                    inlineSubqueryNames.add(subqueryName)
-                }
-                // Replace with pattern that still matches the structure for cleanup
-                val cleanupPattern = """query\s*\(\s*\)[\s\S]*?\.aliasAs<[A-Z]\w+>\(\)""".toRegex()
-                queryChain = cleanupPattern.replace(queryChain, "SUBQUERY_PLACEHOLDER")
-
-                // Extract table combination (from/join/fromAliased/joinAliased/leftJoinAliased) - use LinkedHashSet to maintain order and avoid duplicates
-                val tablesInQuery = linkedSetOf<String>()
-                val tableRefPattern = """(?:from|fromAliased|join|joinAliased|leftJoin|leftJoinAliased)\s*\(\s*(\w+)""".toRegex()
-                tableRefPattern.findAll(queryChain).forEach { typeMatch ->
-                    val tableRef = typeMatch.groupValues[1]
-
-                    // Skip placeholder
-                    if (tableRef == "SUBQUERY_PLACEHOLDER") {
-                        return@forEach
-                    }
-
-                    // Check if this is a subquery variable
-                    if (subqueryVarMap.containsKey(tableRef)) {
-                        // It's a subquery variable - use the subquery name
-                        val subqueryName = subqueryVarMap[tableRef]!!
-                        tablesInQuery.add(subqueryName)
-                    } else {
-                        val tableName = tableNameMap[tableRef.lowercase()] ?: tableRef  // Use original case
-
-                        // Only add if it's a capitalized table name (real table, not variable)
-                        if (tableRef[0].isUpperCase()) {
-                            tablesInQuery.add(tableName)
-                        }
-                    }
-                }
-
-                // Add inline subquery names to tables (these are subqueries used in FROM/JOIN clauses)
-                inlineSubqueryNames.forEach { subqueryName ->
-                    tablesInQuery.add(subqueryName)
-                }
-
-                // Extract selection pattern - PRESERVE ORDER for correct type accumulation!
-                // Use position-aware detection to maintain the actual order in the query chain
-                data class SelectionWithPosition(val position: Int, val selection: String)
-                val selectionsWithPos = mutableListOf<SelectionWithPosition>()
-
-                // 1. Detect named aggregate selections: .select_xxx { aggregate(...) }
-                val namedSelectPattern = """\.select_(\w+)\s*\{""".toRegex()
-                namedSelectPattern.findAll(queryChain).forEach { namedMatch ->
-                    val position = namedMatch.range.first
-                    val accessorName = namedMatch.groupValues[1]
-
-                    // Find the closing brace to extract block content
-                    val blockStart = namedMatch.range.last + 1
-                    var braceCount = 1
-                    var blockEnd = blockStart
-                    while (blockEnd < queryChain.length && braceCount > 0) {
-                        when (queryChain[blockEnd]) {
-                            '{' -> braceCount++
-                            '}' -> braceCount--
-                        }
-                        blockEnd++
-                    }
-
-                    if (blockEnd > blockStart && braceCount == 0) {
-                        val blockContent = queryChain.substring(blockStart, blockEnd - 1)
-                        // Check if block contains an aggregate function
-                        if (aggregatePattern.containsMatchIn(blockContent)) {
-                            selectionsWithPos.add(SelectionWithPosition(position, "agg:$accessorName"))
-                        } else {
-                            // Regular column selection in a named select block
-                            // Extract column selections from this block
-                            val columnInBlockPattern = """\+?\s*(\w+)\.(\w+)""".toRegex()
-                            columnInBlockPattern.findAll(blockContent).forEach { colMatch ->
-                                val tableRef = colMatch.groupValues[1]
-                                val tableName = if (subqueryVarMap.containsKey(tableRef)) {
-                                    subqueryVarMap[tableRef]!!
-                                } else {
-                                    tableNameMap[tableRef.lowercase()] ?: tableRef
-                                }
-                                val columnName = colMatch.groupValues[2]
-                                val columnCapitalized = columnName.replaceFirstChar { it.uppercase() }
-                                selectionsWithPos.add(SelectionWithPosition(position, "$tableName:$columnCapitalized"))
-                            }
-
-                            // Check for .all() in this block
-                            val allInBlockPattern = """\+\s*(\w+)\.all\s*\(\s*\)""".toRegex()
-                            allInBlockPattern.findAll(blockContent).forEach { allMatch ->
-                                val tableRef = allMatch.groupValues[1]
-                                val tableName = if (subqueryVarMap.containsKey(tableRef)) {
-                                    subqueryVarMap[tableRef]!!
-                                } else {
-                                    tableNameMap[tableRef.lowercase()] ?: tableRef
-                                }
-                                selectionsWithPos.add(SelectionWithPosition(position, "$tableName:All"))
-                            }
-                        }
-                    }
-                }
-
-                // 2. Detect regular select blocks: .select { } and .selectAggregates { }
-                // (excluding named selects which were already handled above)
-                val selectBlockPattern = """\.select\s*\{""".toRegex()
-                selectBlockPattern.findAll(queryChain).forEach { blockMatch ->
-                    val position = blockMatch.range.first
-
-                    // Find the closing brace
-                    val blockStart = blockMatch.range.last + 1
-                    var braceCount = 1
-                    var blockEnd = blockStart
-                    while (blockEnd < queryChain.length && braceCount > 0) {
-                        when (queryChain[blockEnd]) {
-                            '{' -> braceCount++
-                            '}' -> braceCount--
-                        }
-                        blockEnd++
-                    }
-
-                    if (blockEnd > blockStart && braceCount == 0) {
-                        val blockContent = queryChain.substring(blockStart, blockEnd - 1)
-
-                        // Extract column selections (with or without + operator)
-                        val columnInBlockPattern = """\+?\s*(\w+)\.(\w+)""".toRegex()
-                        columnInBlockPattern.findAll(blockContent).forEach { colMatch ->
-                            val tableRef = colMatch.groupValues[1]
-                            val tableName = if (subqueryVarMap.containsKey(tableRef)) {
-                                subqueryVarMap[tableRef]!!
-                            } else {
-                                tableNameMap[tableRef.lowercase()] ?: tableRef
-                            }
-                            val columnName = colMatch.groupValues[2]
-
-                            // Skip if inside aggregate function or operator expression
-                            val matchStart = colMatch.range.first
-                            val matchEnd = colMatch.range.last + 1
-                            val before = if (matchStart > 0) blockContent.substring(0, matchStart) else ""
-                            val remaining = if (matchEnd < blockContent.length) blockContent.substring(matchEnd).trim() else ""
-
-                            val openParens = before.count { it == '(' }
-                            val closeParens = before.count { it == ')' }
-                            if (openParens > closeParens) return@forEach  // Inside function call
-
-                            if (remaining.startsWith("eq ") || remaining.startsWith("alias ")) {
-                                return@forEach  // Part of expression
-                            }
-
-                            val columnCapitalized = columnName.replaceFirstChar { it.uppercase() }
-                            selectionsWithPos.add(SelectionWithPosition(position, "$tableName:$columnCapitalized"))
-                        }
-
-                        // Extract .all() selections
-                        val allInBlockPattern = """\+\s*(\w+)\.all\s*\(\s*\)""".toRegex()
-                        allInBlockPattern.findAll(blockContent).forEach { allMatch ->
-                            val tableRef = allMatch.groupValues[1]
-                            val tableName = if (subqueryVarMap.containsKey(tableRef)) {
-                                subqueryVarMap[tableRef]!!
-                            } else {
-                                tableNameMap[tableRef.lowercase()] ?: tableRef
-                            }
-                            selectionsWithPos.add(SelectionWithPosition(position, "$tableName:All"))
-                        }
-                    }
-                }
-
-                // 3. Handle .selectAll() direct calls (outside blocks)
-                selectAllDirectPattern.findAll(queryChain).forEach { match ->
-                    val position = match.range.first
-                    val tableRef = match.groupValues[1]
-                    val tableName = if (subqueryVarMap.containsKey(tableRef)) {
-                        subqueryVarMap[tableRef]!!
-                    } else {
-                        tableNameMap[tableRef.lowercase()] ?: tableRef
-                    }
-                    selectionsWithPos.add(SelectionWithPosition(position, "$tableName:All"))
-                }
-
-                // 4. Handle .selectAllXxx { xxx } lambda-based selectAll calls
-                // Pattern: .selectAllOrderCounts { orderCounts } or .selectAllPerson { person }
-                val selectAllLambdaPattern = """\.selectAll([A-Z][a-zA-Z0-9]*)\s*\{""".toRegex()
-                selectAllLambdaPattern.findAll(queryChain).forEach { match ->
-                    val position = match.range.first
-                    val capitalizedName = match.groupValues[1]  // e.g., "OrderCounts" or "Person"
-
-                    // The capitalized name is the table name for regular tables
-                    // For subqueries, it's also the subquery name (which is the table name)
-                    val tableName = capitalizedName
-
-                    // Add to selections
-                    selectionsWithPos.add(SelectionWithPosition(position, "$tableName:All"))
-                }
-
-                // 5. Handle .selectAs(MarkerName) { column } patterns for named column selections
-                val selectAsPattern = """\.selectAs\(([A-Z]\w+)\)\s*\{\s*(\w+)\.(\w+)\s*\}""".toRegex()
-                selectAsPattern.findAll(queryChain).forEach { match ->
-                    val position = match.range.first
-                    val markerName = match.groupValues[1]  // e.g., "OrgId"
-                    val tableRef = match.groupValues[2]    // e.g., "org"
-                    val columnName = match.groupValues[3]  // e.g., "id"
-
-                    // Resolve table name
-                    val tableName = if (subqueryVarMap.containsKey(tableRef)) {
-                        subqueryVarMap[tableRef]!!
-                    } else {
-                        tableNameMap[tableRef.lowercase()] ?: tableRef
-                    }
-
-                    // Track this as a marker-based column selection
-                    // Format: "col:markerName" to distinguish from regular selections
-                    selectionsWithPos.add(SelectionWithPosition(position, "col:$markerName"))
-                }
-
-                // Sort by position and extract unique selections in order
-                val selections = selectionsWithPos
-                    .sortedBy { it.position }
-                    .map { it.selection }
-                    .distinct()
-
-                // Store this pattern
-                // Skip aggregate-only patterns from .build() queries to avoid overload ambiguity
-                val hasRegularSelections = selections.any { !it.startsWith("agg:") }
-                val isAggregateOnly = selections.isNotEmpty() && !hasRegularSelections
-
-                if (tablesInQuery.isNotEmpty() && selections.isNotEmpty()) {
-                    // Skip if: build() query AND aggregate-only
-                    if (!(isAggregateOnly && !usesExecute)) {
-                        selectionPatterns.getOrPut(tablesInQuery.toList()) { mutableSetOf() }.add(selections.toList())
-                    }
-                }
-
-            }
+            selectionMarkers.add(SelectionMarkerInfo(
+                interfaceName = markerName,
+                propertyName = propertyName,
+                packageName = schemaPkg,
+                resultType = kotlinType,
+                sqlAliasStyle = aliasStyle
+            ))
         }
 
-        // Ensure default "All from all tables" patterns exist for each combination
-        // This is needed because default execute() methods reference these QueryResult classes
-        // Only add default patterns for combinations that exist in queryCombinations
-        queryCombinations.forEach { combination ->
-            // Create default pattern for this specific combination
-            val defaultPattern = combination.map { table -> "$table:All" }
+        // Convert AST subqueries to SubqueryInfo format
+        subqueriesFromAST.forEach { entry ->
+            val alias = entry.key
+            val subqueryPattern = entry.value
 
-            // Add to selectionPatterns (create entry if needed)
-            if (!selectionPatterns.containsKey(combination)) {
-                selectionPatterns[combination] = mutableSetOf()
-            }
-            selectionPatterns[combination]!!.add(defaultPattern)
-
-            // ALSO add patterns for selecting from individual tables in multi-table combinations
-            // This handles cases like LEFT JOIN where you might only select from the main table
-            if (combination.size > 1) {
-                combination.forEach { table ->
-                    val singleTablePattern = listOf("$table:All")
-                    selectionPatterns[combination]!!.add(singleTablePattern)
+            // Extract columns from the subquery pattern
+            val columns = subqueryPattern.operations
+                .filter { op: QueryOperation -> op.type == com.obabichev.kodama.compiler.parser.OperationType.SELECT_ALIASED }
+                .map { op: QueryOperation ->
+                    SubqueryColumnInfo(
+                        propertyName = (op.marker ?: "value").replaceFirstChar { it.lowercase() },
+                        sqlColumnName = (op.marker ?: "value").lowercase(),
+                        kotlinType = markerTypes[op.marker] ?: "String",
+                        isMarkerBased = true
+                    )
                 }
-            }
+
+            subqueries[alias] = SubqueryInfo(
+                name = alias,
+                sqlAlias = alias.lowercase(),
+                columns = columns,
+                sourceTables = subqueryPattern.getTables()
+            )
         }
 
+        logger.lifecycle("Kodama: Converted AST data to generator format")
+        logger.lifecycle("  - Selection markers: ${selectionMarkers.size}")
+        logger.lifecycle("  - Subqueries: ${subqueries.size}")
+
         // ==============================================
-        // NEW: Generate table combinations from relationships
+        // QUERY COMBINATION GENERATION
+        // Using relationship-based generation
         // ==============================================
 
-        // Load relationship metadata BEFORE transformation
+        // Load relationship metadata
         val relationshipMetadata = loadRelationshipMetadata()
 
         if (relationshipMetadata.relationships.isNotEmpty()) {
@@ -1365,6 +525,34 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
         } else {
             logger.lifecycle("Kodama Phase 2: No relationships.json found - generating from single tables only")
         }
+
+        // ==============================================
+        // ADD DEFAULT SELECTION PATTERNS
+        // ==============================================
+
+        // Ensure default "All from all tables" patterns exist for each combination
+        // This is needed because default execute() methods reference these QueryResult classes
+        queryCombinations.forEach { combination ->
+            // Create default pattern for this specific combination
+            val defaultPattern = combination.map { table -> "$table:All" }
+
+            // Add to selectionPatterns (create entry if needed)
+            if (!selectionPatterns.containsKey(combination)) {
+                selectionPatterns[combination] = mutableSetOf()
+            }
+            selectionPatterns[combination]!!.add(defaultPattern)
+
+            // ALSO add patterns for selecting from individual tables in multi-table combinations
+            // This handles cases like LEFT JOIN where you might only select from the main table
+            if (combination.size > 1) {
+                combination.forEach { table ->
+                    val singleTablePattern = listOf("$table:All")
+                    selectionPatterns[combination]!!.add(singleTablePattern)
+                }
+            }
+        }
+
+        logger.lifecycle("Kodama Phase 2: Added default selection patterns for ${queryCombinations.size} combinations")
 
         // ==============================================
         // NEW: Use refactored generator system

@@ -1,5 +1,8 @@
 package com.obabichev.kodama.compiler
 
+import com.obabichev.kodama.compiler.metadata.KspMetadataRoot
+import com.obabichev.kodama.compiler.parser.KotlinASTParser
+import kotlinx.serialization.json.Json
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.jetbrains.kotlin.gradle.dsl.KotlinProjectExtension
@@ -164,9 +167,30 @@ class KodamaGradlePlugin : Plugin<Project> {
     }
 
     /**
-     * Auto-detect the package name by finding the first Table definition
+     * Auto-detect the package name by finding the first Table definition.
+     *
+     * Strategy:
+     * 1. Try to load KSP metadata from previous build (if exists)
+     * 2. Fall back to source file scanning if KSP metadata not available
      */
     private fun detectPackageFromSourceFiles(sourceDir: File, project: Project): String {
+        // Strategy 1: Try KSP metadata first (from previous build)
+        val kspMetadataFile = File(project.buildDir, "generated/ksp/main/resources/kodama-ksp-metadata.json")
+        if (kspMetadataFile.exists()) {
+            try {
+                val json = Json { ignoreUnknownKeys = true }
+                val metadata = json.decodeFromString<KspMetadataRoot>(kspMetadataFile.readText())
+                if (metadata.tables.isNotEmpty()) {
+                    val detectedPackage = metadata.tables.first().packageName
+                    project.logger.info("Kodama: Auto-detected schema package from KSP metadata: $detectedPackage")
+                    return detectedPackage
+                }
+            } catch (e: Exception) {
+                project.logger.debug("Kodama: Could not load KSP metadata, falling back to source scanning: ${e.message}")
+            }
+        }
+
+        // Strategy 2: Fall back to source file scanning
         if (!sourceDir.exists()) {
             project.logger.warn("Kodama: Source directory not found: $sourceDir, using default package")
             return "com.obabichev.kodama.schema"
@@ -174,32 +198,48 @@ class KodamaGradlePlugin : Plugin<Project> {
 
         val kotlinFiles = sourceDir.walkTopDown().filter { it.extension == "kt" }
 
-        for (file in kotlinFiles) {
-            val content = file.readText()
+        // Look for files with Table definitions using AST parsing
+        val parser = KotlinASTParser()
+        try {
+            for (file in kotlinFiles) {
+                val content = file.readText()
 
-            // Look for: object SomeName : Table(...)
-            if (content.contains(": Table(")) {
-                // Extract package declaration
-                val packagePattern = """package\s+([\w.]+)""".toRegex()
-                val packageMatch = packagePattern.find(content)
-                if (packageMatch != null) {
-                    val detectedPackage = packageMatch.groupValues[1]
-                    project.logger.info("Kodama: Auto-detected schema package from ${file.name}: $detectedPackage")
-                    return detectedPackage
+                // Look for: object SomeName : Table(...)
+                if (content.contains(": Table(")) {
+                    try {
+                        // Extract package declaration using AST parsing (zero regex!)
+                        val ktFile = parser.parse(file)
+                        val packageName = ktFile.packageFqName.asString()
+                        if (packageName.isNotEmpty()) {
+                            project.logger.info("Kodama: Auto-detected schema package from ${file.name}: $packageName")
+                            return packageName
+                        }
+                    } catch (e: Exception) {
+                        project.logger.debug("Kodama: Failed to parse ${file.name} with AST, skipping: ${e.message}")
+                    }
                 }
             }
+        } finally {
+            parser.dispose()
         }
 
-        // Fallback: try to detect any package declaration
-        for (file in kotlinFiles) {
-            val content = file.readText()
-            val packagePattern = """package\s+([\w.]+)""".toRegex()
-            val packageMatch = packagePattern.find(content)
-            if (packageMatch != null) {
-                val detectedPackage = packageMatch.groupValues[1]
-                project.logger.info("Kodama: Using package from ${file.name}: $detectedPackage")
-                return detectedPackage
+        // Final fallback: try to detect any package declaration using AST parsing
+        val fallbackParser = KotlinASTParser()
+        try {
+            for (file in kotlinFiles) {
+                try {
+                    val ktFile = fallbackParser.parse(file)
+                    val packageName = ktFile.packageFqName.asString()
+                    if (packageName.isNotEmpty()) {
+                        project.logger.info("Kodama: Using package from ${file.name}: $packageName")
+                        return packageName
+                    }
+                } catch (e: Exception) {
+                    project.logger.debug("Kodama: Failed to parse ${file.name}, skipping: ${e.message}")
+                }
             }
+        } finally {
+            fallbackParser.dispose()
         }
 
         project.logger.warn("Kodama: Could not auto-detect package, using default")

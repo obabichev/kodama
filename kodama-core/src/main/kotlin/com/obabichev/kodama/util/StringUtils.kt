@@ -1,10 +1,7 @@
-package com.obabichev.kodama.compiler.util
+package com.obabichev.kodama.util
 
 /**
- * Utility functions for string case conversions in the compiler plugin.
- *
- * NOTE: This is a duplicate of com.obabichev.kodama.util.StringUtils
- * because the compiler plugin cannot depend on kodama-core (circular dependency).
+ * Utility functions for string case conversions.
  *
  * These functions eliminate the need for regex-based case conversions
  * and provide a faster, more maintainable alternative.

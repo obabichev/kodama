@@ -29,7 +29,7 @@ kotlin {
 
 dependencies {
     // Kotlin compiler dependencies
-    compileOnly("org.jetbrains.kotlin:kotlin-compiler-embeddable")
+    implementation("org.jetbrains.kotlin:kotlin-compiler-embeddable") // Changed to implementation for AST parsing
     compileOnly("org.jetbrains.kotlin:kotlin-gradle-plugin-api")
     implementation("org.jetbrains.kotlin:kotlin-gradle-plugin")
 

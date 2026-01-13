@@ -2,6 +2,7 @@ package com.obabichev.kodama.entity
 
 import com.obabichev.kodama.components.Column
 import com.obabichev.kodama.schema.EntityTable
+import com.obabichev.kodama.util.normalizeSQL
 import java.sql.Connection
 import kotlin.reflect.KClass
 
@@ -226,7 +227,7 @@ class EntitySession(
             stmt.setObject(1, foreignKeyValue)
 
             // Log query
-            val sqlOneLine = sql.replace("\n", " ").replace(Regex("\\s+"), " ")
+            val sqlOneLine = sql.normalizeSQL()
             println("[Kodama] SQL: $sqlOneLine | params: [$foreignKeyValue]")
 
             stmt.executeQuery().use { rs ->
@@ -286,7 +287,7 @@ class EntitySession(
             stmt.setObject(1, id)
 
             // Log query
-            val sqlOneLine = sql.replace("\n", " ").replace(Regex("\\s+"), " ")
+            val sqlOneLine = sql.normalizeSQL()
             println("[Kodama] SQL: $sqlOneLine | params: [$id]")
 
             // Execute query
@@ -529,7 +530,7 @@ class EntitySession(
 
             // Log query
             val params = columns.map { values[it] }
-            val sqlOneLine = sql.replace("\n", " ").replace(Regex("\\s+"), " ")
+            val sqlOneLine = sql.normalizeSQL()
             println("[Kodama] SQL: $sqlOneLine | params: $params")
 
             // Execute
@@ -611,7 +612,7 @@ class EntitySession(
 
             // Log query
             val params = columns.map { changes[it] } + pkValue
-            val sqlOneLine = sql.replace("\n", " ").replace(Regex("\\s+"), " ")
+            val sqlOneLine = sql.normalizeSQL()
             println("[Kodama] SQL: $sqlOneLine | params: $params")
 
             // Execute
@@ -667,7 +668,7 @@ class EntitySession(
             stmt.setObject(1, pkValue)
 
             // Log query
-            val sqlOneLine = sql.replace("\n", " ").replace(Regex("\\s+"), " ")
+            val sqlOneLine = sql.normalizeSQL()
             println("[Kodama] SQL: $sqlOneLine | params: [$pkValue]")
 
             // Execute
