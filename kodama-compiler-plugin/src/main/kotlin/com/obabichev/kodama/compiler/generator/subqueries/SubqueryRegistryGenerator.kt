@@ -87,20 +87,8 @@ class SubqueryRegistryGenerator(
             subqueries.forEach { subquery ->
                 appendLine("        // Register ${subquery.name} subquery")
                 appendLine("        register<${subquery.name}> {")
-
-                // If sourceTables is empty, generate error - this subquery must be used inline
-                if (subquery.sourceTables.isEmpty()) {
-                    appendLine("            error(\"Subquery ${subquery.name} must be used with inline definition: fromAliased(${subquery.name}) { /* query */ }\")")
-                } else {
-                    // Generate default query from source tables
-                    val sourceTable = subquery.sourceTables.first()
-                    appendLine("            SubqueryTable_${subquery.name}(")
-                    appendLine("                query = from($sourceTable)")
-                    appendLine("                    .selectAll($sourceTable)")
-                    appendLine("                    .build()")
-                    appendLine("            )")
-                }
-
+                // All subqueries must be defined inline with fromAliased()
+                appendLine("            error(\"Subquery ${subquery.name} must be used with inline definition: fromAliased(${subquery.name}) { /* query */ }\")")
                 appendLine("        }")
                 appendLine()
             }

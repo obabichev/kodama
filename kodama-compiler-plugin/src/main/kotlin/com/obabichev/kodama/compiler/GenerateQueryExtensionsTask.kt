@@ -430,9 +430,10 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
             val columns = subqueryPattern.operations
                 .filter { op: QueryOperation -> op.type == com.obabichev.kodama.compiler.parser.OperationType.SELECT_ALIASED }
                 .map { op: QueryOperation ->
+                    val markerName = op.marker ?: "value"
                     SubqueryColumnInfo(
-                        propertyName = (op.marker ?: "value").replaceFirstChar { it.lowercase() },
-                        sqlColumnName = (op.marker ?: "value").lowercase(),
+                        propertyName = markerName.replaceFirstChar { it.lowercase() },
+                        sqlColumnName = markerName.toSnakeCase(),
                         kotlinType = markerTypes[op.marker] ?: "String",
                         isMarkerBased = true
                     )
@@ -440,7 +441,7 @@ abstract class GenerateQueryExtensionsTask : DefaultTask() {
 
             subqueries[alias] = SubqueryInfo(
                 name = alias,
-                sqlAlias = alias.lowercase(),
+                sqlAlias = alias.toSnakeCase(),
                 columns = columns,
                 sourceTables = subqueryPattern.getTables()
             )

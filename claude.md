@@ -557,7 +557,7 @@ Generated code is now placed in `{schemaPackage}.generated` instead of hardcoded
 
 ## Current State
 
-- Version: 0.5.0 (Alpha)
+- Version: 0.5.1 (Alpha)
 - **All tests passing** including:
   - QuerySimpleDataClassTests (8 tests)
   - QueryAggregateTests (3 tests)

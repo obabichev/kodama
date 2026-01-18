@@ -1199,7 +1199,7 @@ class PhantomFromAliasedGenerator(
         appendLine("inline fun <reified T> fromAliased(")
         appendLine("    marker: T,")
         appendLine("    queryBuilder: () -> Query")
-        appendLine("): QueryBuilder_1<${subqueryName}Marker, NoSelections>")
+        appendLine("): QueryBuilder_1<${subqueryName}Marker, $generatedPackage.TableNotSelected, $generatedPackage.NoSelections>")
         appendLine("    where T : $subqueryName {")
         appendLine("    val query = queryBuilder()")
         appendLine("    val subqueryTable = SubqueryRegistry.createSubquery(T::class, query) as $subqueryTableClassName")
@@ -1413,12 +1413,14 @@ class SubqueryResultExtensionsGenerator(
                 if (i == position) "${subqueryName}Marker" else "T$i"
             }.joinToString(", ")
 
-            // Add Sel parameter to match QueryResult_N signature
-            val fullTypeArgs = "$tableTypeArgs, Sel"
+            // Add selection status parameters (S1, S2, ...) and Sel to match QueryResult_N signature
+            val selectionStatusParams = (1..tableCount).joinToString(", ") { "S$it : $generatedPackage.SelectionStatus" }
+            val selectionStatusArgs = (1..tableCount).joinToString(", ") { "S$it" }
+            val fullTypeArgs = "$tableTypeArgs, $selectionStatusArgs, Sel"
             val paramsList = if (otherParams.isNotEmpty()) {
-                "<$otherParams, Sel : SelectionSet>"
+                "<$otherParams, $selectionStatusParams, Sel : $generatedPackage.SelectionSet>"
             } else {
-                "<Sel : SelectionSet>"
+                "<$selectionStatusParams, Sel : $generatedPackage.SelectionSet>"
             }
 
             appendLine("/**")
@@ -1478,16 +1480,23 @@ class PhantomJoinAliasedGenerator(
         val fromTypeParams = (1..fromTableCount).joinToString(", ") { "T$it : TableMarker" }
         val fromTypeArgs = (1..fromTableCount).joinToString(", ") { "T$it" }
 
+        // Selection status parameters for source
+        val fromSelectionParams = (1..fromTableCount).joinToString(", ") { "S$it : $generatedPackage.SelectionStatus" }
+        val fromSelectionArgs = (1..fromTableCount).joinToString(", ") { "S$it" }
+
         // Type parameters for target QueryBuilder (with subquery added)
         val toTypeArgs = fromTypeArgs + ", $subqueryMarker"
+
+        // Selection status args for target: keep existing, add TableNotSelected for new subquery
+        val toSelectionArgs = fromSelectionArgs + ", $generatedPackage.TableNotSelected"
 
         appendLine("/**")
         appendLine(" * INNER JOIN $subqueryName subquery to $fromTableCount-table query.")
         appendLine(" */")
-        appendLine("inline fun <$fromTypeParams, Sel : SelectionSet> QueryBuilder_$fromTableCount<$fromTypeArgs, Sel>.joinAliased(")
+        appendLine("inline fun <$fromTypeParams, $fromSelectionParams, Sel : $generatedPackage.SelectionSet> QueryBuilder_$fromTableCount<$fromTypeArgs, $fromSelectionArgs, Sel>.joinAliased(")
         appendLine("    subquery: $subqueryName,")
         appendLine("    crossinline condition: MultiTableJoinContext_$toTableCount<$toTypeArgs>.() -> Expression")
-        appendLine("): QueryBuilder_$toTableCount<$toTypeArgs, Sel> {")
+        appendLine("): QueryBuilder_$toTableCount<$toTypeArgs, $toSelectionArgs, Sel> {")
         appendLine("    val table = subquery as SubqueryTable")
         appendLine("    state._subqueryTables[table.alias] = table")
         appendLine("    val join = Join(")
@@ -1534,16 +1543,23 @@ class PhantomLeftJoinAliasedGenerator(
         val fromTypeParams = (1..fromTableCount).joinToString(", ") { "T$it : TableMarker" }
         val fromTypeArgs = (1..fromTableCount).joinToString(", ") { "T$it" }
 
+        // Selection status parameters for source
+        val fromSelectionParams = (1..fromTableCount).joinToString(", ") { "S$it : $generatedPackage.SelectionStatus" }
+        val fromSelectionArgs = (1..fromTableCount).joinToString(", ") { "S$it" }
+
         // Type parameters for target QueryBuilder (with subquery added)
         val toTypeArgs = fromTypeArgs + ", $subqueryMarker"
+
+        // Selection status args for target: keep existing, add TableNotSelected for new subquery
+        val toSelectionArgs = fromSelectionArgs + ", $generatedPackage.TableNotSelected"
 
         appendLine("/**")
         appendLine(" * LEFT JOIN $subqueryName subquery to $fromTableCount-table query.")
         appendLine(" */")
-        appendLine("inline fun <$fromTypeParams, Sel : SelectionSet> QueryBuilder_$fromTableCount<$fromTypeArgs, Sel>.leftJoinAliased(")
+        appendLine("inline fun <$fromTypeParams, $fromSelectionParams, Sel : $generatedPackage.SelectionSet> QueryBuilder_$fromTableCount<$fromTypeArgs, $fromSelectionArgs, Sel>.leftJoinAliased(")
         appendLine("    subquery: $subqueryName,")
         appendLine("    crossinline condition: MultiTableJoinContext_$toTableCount<$toTypeArgs>.() -> Expression")
-        appendLine("): QueryBuilder_$toTableCount<$toTypeArgs, Sel> {")
+        appendLine("): QueryBuilder_$toTableCount<$toTypeArgs, $toSelectionArgs, Sel> {")
         appendLine("    val table = subquery as SubqueryTable")
         appendLine("    state._subqueryTables[table.alias] = table")
         appendLine("    val join = Join(")
@@ -1569,6 +1585,118 @@ class PhantomLeftJoinAliasedGenerator(
             "com.obabichev.kodama.components.expression.Expression",
             "$generatedPackage.MultiTableJoinContext_$toTableCount"
         )
+    }
+}
+
+/**
+ * Generates selectAll() extensions for subqueries with phantom type constraints.
+ *
+ * This provides compile-time safety by ensuring you can only call selectAll(SubqueryInterface)
+ * if that subquery's marker is actually in the query's type parameters.
+ *
+ * Example generated code for UserTotalSubquery:
+ * ```kotlin
+ * // For QueryBuilder_2 - only works if T2 is UserTotalSubqueryMarker
+ * inline fun <T1 : TableMarker, S1 : SelectionStatus, S2 : SelectionStatus, Sel : SelectionSet>
+ * QueryBuilder_2<T1, UserTotalSubqueryMarker, S1, S2, Sel>.selectAll(
+ *     table: UserTotalSubquery
+ * ): QueryBuilder_2<T1, UserTotalSubqueryMarker, S1, TableSelected, Sel> {
+ *     state.applySelection(TableAllSelection(table as SubqueryTable, table.allColumns()))
+ *     return QueryBuilder_2(state)
+ * }
+ * ```
+ *
+ * This ensures:
+ * - from(Person).joinAliased(subquery).selectAll(UserTotalSubquery) ✅ compiles
+ * - from(Person).selectAll(UserTotalSubquery) ❌ doesn't compile (not joined)
+ */
+class PhantomSubquerySelectAllGenerator(
+    private val subqueryInfo: com.obabichev.kodama.compiler.data.SubqueryInfo,
+    private val tableCount: Int,  // Which QueryBuilder_N to generate for (2-5, since subquery adds a table)
+    private val generatedPackage: String
+) : CodeGenerator {
+
+    override fun requiredImports(): Set<String> = setOf(
+        "com.obabichev.kodama.query.TableAllSelection",
+        "com.obabichev.kodama.query.SubqueryTable"
+    )
+
+    override fun generate(): String = buildString {
+        val subqueryName = subqueryInfo.name
+        val markerType = "${subqueryName}Marker"
+
+        // Generate extensions for each position where this subquery's marker could appear
+        for (position in 1..tableCount) {
+            appendLine("/**")
+            appendLine(" * Select all columns from $subqueryName subquery.")
+            appendLine(" * Only available when ${subqueryName}Marker is at position $position in the query.")
+            appendLine(" * Flips selection status at position $position from TableNotSelected to TableSelected.")
+            appendLine(" */")
+
+            // Add @JvmName to avoid signature clashes after type erasure
+            appendLine("@JvmName(\"selectAll${subqueryName}AtPosition${position}Of$tableCount\")")
+
+            // Build type parameters: Other table types + all selection statuses + Sel
+            val typeParams = buildList {
+                // Add other table type parameters (exclude the fixed position)
+                for (i in 1..tableCount) {
+                    if (i != position) {
+                        add("T$i : $generatedPackage.TableMarker")
+                    }
+                }
+                // Add all selection status parameters (all are generic in receiver)
+                for (i in 1..tableCount) {
+                    add("S$i : $generatedPackage.SelectionStatus")
+                }
+                add("Sel : $generatedPackage.SelectionSet")
+            }.joinToString(", ")
+
+            // Build receiver type arguments: Fixed marker at position, others generic, all S generic
+            val receiverTypeArgs = buildList {
+                // Table markers
+                for (i in 1..tableCount) {
+                    if (i == position) {
+                        add(markerType)
+                    } else {
+                        add("T$i")
+                    }
+                }
+                // Selection statuses (all generic in receiver)
+                for (i in 1..tableCount) {
+                    add("S$i")
+                }
+                add("Sel")
+            }.joinToString(", ")
+
+            // Build return type arguments: Same tables, but flip S{position} to TableSelected
+            val returnTypeArgs = buildList {
+                // Table markers (unchanged)
+                for (i in 1..tableCount) {
+                    if (i == position) {
+                        add(markerType)
+                    } else {
+                        add("T$i")
+                    }
+                }
+                // Selection statuses: Flip position to TableSelected, keep others generic
+                for (i in 1..tableCount) {
+                    if (i == position) {
+                        add("$generatedPackage.TableSelected")  // Flip to TableSelected!
+                    } else {
+                        add("S$i")  // Keep generic
+                    }
+                }
+                add("Sel")
+            }.joinToString(", ")
+
+            appendLine("inline fun <$typeParams> $generatedPackage.QueryBuilder_$tableCount<$receiverTypeArgs>.selectAll(")
+            appendLine("    table: $generatedPackage.$subqueryName")
+            appendLine("): $generatedPackage.QueryBuilder_$tableCount<$returnTypeArgs> {")
+            appendLine("    state.applySelection(com.obabichev.kodama.query.TableAllSelection(table as com.obabichev.kodama.query.SubqueryTable, (table as com.obabichev.kodama.query.SubqueryTable).allColumns()))")
+            appendLine("    return $generatedPackage.QueryBuilder_$tableCount(state)")
+            appendLine("}")
+            appendLine()
+        }
     }
 }
 
