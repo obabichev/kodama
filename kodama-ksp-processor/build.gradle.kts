@@ -3,6 +3,7 @@ import java.util.Properties
 
 plugins {
     kotlin("jvm") version "2.0.21"
+    kotlin("plugin.serialization") version "2.0.21"
     `maven-publish`
     signing
 }
@@ -25,6 +26,7 @@ kotlin {
 dependencies {
     implementation(project(":kodama-core"))
     implementation("com.google.devtools.ksp:symbol-processing-api:2.0.21-1.0.27")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
 }
 
 tasks.withType<KotlinCompile> {

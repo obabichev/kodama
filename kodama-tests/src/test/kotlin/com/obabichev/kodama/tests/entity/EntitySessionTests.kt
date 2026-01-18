@@ -3,10 +3,10 @@ package com.obabichev.kodama.tests.entity
 import com.obabichev.kodama.entity.EntitySession
 import com.obabichev.kodama.schema.Table
 import com.obabichev.kodama.tests.entity.User
-import com.obabichev.kodama.tests.entity.impl.*
+import com.obabichev.kodama.tests.entity.generated.*
 import com.obabichev.kodama.tests.infrastructure.DatabaseTest
 import com.obabichev.kodama.tests.schema.Users
-import com.obabichev.kodama.tests.KodamaBindingRegistry
+import com.obabichev.kodama.tests.entity.generated.KodamaBindingRegistry
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull

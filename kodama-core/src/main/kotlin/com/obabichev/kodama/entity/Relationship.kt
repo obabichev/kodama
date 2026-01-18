@@ -66,3 +66,52 @@ data class ManyToOneRelationship<E : Any, FK : Any>(
         }
     }
 }
+
+/**
+ * Many-to-many relationship metadata.
+ *
+ * Example: Users (N) ← UserRoles → Roles (M)
+ * Users can have many roles, and roles can be assigned to many users.
+ *
+ * A many-to-many relationship requires a junction table that holds foreign keys
+ * to both sides of the relationship.
+ *
+ * @param E Entity type of the target side (e.g., Role)
+ * @param SourceFK Foreign key type pointing to source (e.g., Int for userId)
+ * @param TargetFK Foreign key type pointing to target (e.g., Int for roleId)
+ * @param name Relationship property name (e.g., "roles")
+ * @param targetTable The target side EntityTable (e.g., Roles)
+ * @param junctionTable The junction table that links both entities (e.g., UserRoles)
+ * @param sourceForeignKeyColumn Column in junction table pointing to source (e.g., UserRoles.userId)
+ * @param targetForeignKeyColumn Column in junction table pointing to target (e.g., UserRoles.roleId)
+ * @param sourcePrimaryKeyColumn Column in source table (e.g., Users.id)
+ * @param targetPrimaryKeyColumn Column in target table (e.g., Roles.id)
+ */
+data class ManyToManyRelationship<E : Any, SourceFK : Any, TargetFK : Any>(
+    val name: String,
+    val targetTable: EntityTable<E>,
+    val junctionTable: EntityTable<*>,
+    val sourceForeignKeyColumn: Column<SourceFK>,
+    val targetForeignKeyColumn: Column<TargetFK>,
+    val sourcePrimaryKeyColumn: Column<SourceFK>,
+    val targetPrimaryKeyColumn: Column<TargetFK>
+) : Relationship {
+
+    init {
+        // Validate that junction table columns belong to junction table
+        require(sourceForeignKeyColumn.relation == junctionTable.relation) {
+            "Source foreign key column ${sourceForeignKeyColumn.name} must belong to junction table ${junctionTable.tableName}, " +
+            "but belongs to ${sourceForeignKeyColumn.relation.name}"
+        }
+        require(targetForeignKeyColumn.relation == junctionTable.relation) {
+            "Target foreign key column ${targetForeignKeyColumn.name} must belong to junction table ${junctionTable.tableName}, " +
+            "but belongs to ${targetForeignKeyColumn.relation.name}"
+        }
+
+        // Validate that primary key columns belong to their respective tables
+        require(targetPrimaryKeyColumn.relation == targetTable.relation) {
+            "Target primary key column ${targetPrimaryKeyColumn.name} must belong to target table ${targetTable.tableName}, " +
+            "but belongs to ${targetPrimaryKeyColumn.relation.name}"
+        }
+    }
+}

@@ -90,15 +90,28 @@ class KodamaGradlePlugin : Plugin<Project> {
 
             // Configure Phase 1 task (Table Metadata)
             val buildDir = project.layout.buildDirectory.asFile.get()
+
+            // Configure KSP options
+            project.extensions.findByName("ksp")?.let { kspExtension ->
+                try {
+                    val argMethod = kspExtension.javaClass.getMethod("arg", String::class.java, String::class.java)
+                    argMethod.invoke(kspExtension, "kodama.build.dir", buildDir.absolutePath)
+                    project.logger.info("Kodama: Configured KSP option kodama.build.dir=${buildDir.absolutePath}")
+                } catch (e: Exception) {
+                    project.logger.warn("Kodama: Failed to configure KSP option: ${e.message}")
+                }
+            }
             val generatedDir = File(buildDir, "generated/kodama")
             val kspMetadataFile = File(buildDir, "generated/ksp/main/resources/kodama-ksp-metadata.json")
             val tableMetadataFile = File(generatedDir, "TableMetadata.kt")
+            val runtimeMetadataJsonFile = File(buildDir, "generated/kodama/runtime-table-metadata.json")
 
             generateTableMetadataTask.configure {
                 it.schemaPackage.set(detectedSchemaPackage)
                 it.generatedPackage.set(detectedGeneratedPackage)
                 it.kspMetadataFile.set(kspMetadataFile)
                 it.outputFile.set(tableMetadataFile)
+                it.runtimeMetadataJsonFile.set(runtimeMetadataJsonFile)
             }
 
             // Configure Phase 2 task (Query Extensions)
@@ -145,6 +158,12 @@ class KodamaGradlePlugin : Plugin<Project> {
                     generateTableMetadataTask.configure { it.dependsOn(kspTask) }
                 }
 
+                // Note on entity generation: Entity generation happens in kspKotlin,
+                // but it needs runtime metadata from generateTableMetadataTask.
+                // Since generateTableMetadataTask depends on kspKotlin's output, we have a circular dependency.
+                // Solution: Run the build twice - first build generates runtime metadata, second uses it.
+                // TODO: Move entity generation to a separate code generator task that runs after generateTableMetadataTask
+
                 // Phase 2 dependencies: Make generateKodamaQueryExtensions depend on Phase 1
                 // (needs TableMetadata.kt from Phase 1)
                 generateQueryExtensionsTask.configure {
@@ -171,7 +190,8 @@ class KodamaGradlePlugin : Plugin<Project> {
      *
      * Strategy:
      * 1. Try to load KSP metadata from previous build (if exists)
-     * 2. Fall back to source file scanning if KSP metadata not available
+     * 2. Prefer "schema" package over "entity" package for stability
+     * 3. Fall back to source file scanning if KSP metadata not available
      */
     private fun detectPackageFromSourceFiles(sourceDir: File, project: Project): String {
         // Strategy 1: Try KSP metadata first (from previous build)
@@ -181,8 +201,19 @@ class KodamaGradlePlugin : Plugin<Project> {
                 val json = Json { ignoreUnknownKeys = true }
                 val metadata = json.decodeFromString<KspMetadataRoot>(kspMetadataFile.readText())
                 if (metadata.tables.isNotEmpty()) {
-                    val detectedPackage = metadata.tables.first().packageName
+                    // Stable package selection: prefer "schema" package over "entity" package
+                    // This ensures consistent generated code location across builds
+                    val detectedPackage = metadata.tables
+                        // First, try to find a table in a "schema" package
+                        .firstOrNull { it.packageName.endsWith(".schema") }?.packageName
+                        // If no schema package, use the first table's package (sorted for stability)
+                        ?: metadata.tables.sortedBy { it.packageName }.first().packageName
+
                     project.logger.info("Kodama: Auto-detected schema package from KSP metadata: $detectedPackage")
+                    if (metadata.tables.any { it.packageName != detectedPackage }) {
+                        project.logger.info("Kodama: Note: Multiple packages detected. Using '$detectedPackage' for generated code.")
+                        project.logger.info("Kodama: To specify a different package, configure: kodama { generatedPackage.set(\"your.package.generated\") }")
+                    }
                     return detectedPackage
                 }
             } catch (e: Exception) {
@@ -196,10 +227,11 @@ class KodamaGradlePlugin : Plugin<Project> {
             return "com.obabichev.kodama.schema"
         }
 
-        val kotlinFiles = sourceDir.walkTopDown().filter { it.extension == "kt" }
+        val kotlinFiles = sourceDir.walkTopDown().filter { it.extension == "kt" }.toList()
 
         // Look for files with Table definitions using AST parsing
         val parser = KotlinASTParser()
+        val discoveredPackages = mutableListOf<String>()
         try {
             for (file in kotlinFiles) {
                 val content = file.readText()
@@ -211,8 +243,7 @@ class KodamaGradlePlugin : Plugin<Project> {
                         val ktFile = parser.parse(file)
                         val packageName = ktFile.packageFqName.asString()
                         if (packageName.isNotEmpty()) {
-                            project.logger.info("Kodama: Auto-detected schema package from ${file.name}: $packageName")
-                            return packageName
+                            discoveredPackages.add(packageName)
                         }
                     } catch (e: Exception) {
                         project.logger.debug("Kodama: Failed to parse ${file.name} with AST, skipping: ${e.message}")
@@ -221,6 +252,20 @@ class KodamaGradlePlugin : Plugin<Project> {
             }
         } finally {
             parser.dispose()
+        }
+
+        // Prefer "schema" package for stability
+        if (discoveredPackages.isNotEmpty()) {
+            val selectedPackage = discoveredPackages
+                .firstOrNull { it.endsWith(".schema") }
+                ?: discoveredPackages.sorted().first()
+
+            project.logger.info("Kodama: Auto-detected schema package from source files: $selectedPackage")
+            if (discoveredPackages.distinct().size > 1) {
+                project.logger.info("Kodama: Note: Multiple packages detected. Using '$selectedPackage' for generated code.")
+                project.logger.info("Kodama: To specify a different package, configure: kodama { generatedPackage.set(\"your.package.generated\") }")
+            }
+            return selectedPackage
         }
 
         // Final fallback: try to detect any package declaration using AST parsing

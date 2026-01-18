@@ -651,6 +651,78 @@ from(User)
 - Optional parameters (nullable)
 - Type-safe method chaining
 
+## Relationship Discovery (Optional)
+
+Kodama automatically discovers table relationships by analyzing your query code. **No configuration is required** - just write your queries and Kodama will generate the necessary JOIN support.
+
+### How It Works
+
+Kodama uses an AST (Abstract Syntax Tree) parser to scan your test files and discover:
+
+1. **Table combinations** - Which tables are joined together in your queries
+2. **Column markers** - Custom selection markers (like `TotalRevenue`)
+3. **Subqueries** - Reusable subqueries with typed columns
+
+This happens **automatically during compilation** - no setup needed!
+
+### Example
+
+Write a query with a join:
+
+```kotlin
+// In your test file or application code
+from(Person)
+    .join(Order) { order.userName eq person.name }
+    .selectAll(Person)
+    .selectAll(Order)
+    .execute(transaction)
+```
+
+Kodama's AST parser will automatically:
+- Discover the `Person → Order` relationship
+- Generate type-safe JOIN builders
+- Create accessor methods for both tables
+
+### Advanced: Explicit Relationships (Optional)
+
+For production applications, you can optionally declare relationships explicitly for:
+- **Better documentation** - Relationships are self-documenting in your code
+- **Compile-time validation** - Invalid joins won't compile (future feature)
+- **IDE support** - Better autocomplete and refactoring
+
+To declare explicit relationships, the Kodama KSP processor can generate a `relationships.json` file from your table definitions. This is **completely optional** - AST discovery works great for most use cases.
+
+**When to use explicit relationships:**
+- ✅ Large production applications (self-documenting)
+- ✅ Want to enforce relationship constraints at compile-time
+- ✅ Need better IDE autocomplete for joins
+
+**When to use AST discovery (default):**
+- ✅ Getting started with Kodama
+- ✅ Rapid prototyping
+- ✅ Smaller applications
+- ✅ Don't want extra configuration
+
+### Relationship Discovery Process
+
+During compilation, Kodama:
+
+1. **Scans your code** (AST parser analyzes all `.kt` files)
+2. **Discovers patterns** (finds `from(X).join(Y)` calls)
+3. **Generates builders** (creates type-safe query extensions)
+4. **Outputs code** (to `build/generated/kodama/`)
+
+Build log example:
+```
+Kodama AST Parser: Starting query discovery
+✅ AST Parser: Discovered 18 table combinations
+✅ AST Parser: Discovered 13 column markers
+Kodama Phase 2: Generating from 18 AST-discovered table combinations
+Kodama Phase 2: Generated 931 code generators
+```
+
+**Zero configuration required!** Just write queries and Kodama handles the rest.
+
 ## Joins
 
 Kodama provides full support for all SQL join types with compile-time type safety. Join multiple tables together and access columns from all joined tables in a type-safe manner.

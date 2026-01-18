@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Zero-boilerplate entity binding auto-discovery** - Entity bindings now initialize automatically with no manual setup
+  - `EntitySession` automatically discovers and initializes `KodamaBindingRegistry` on first use
+  - Generated `META-INF/kodama/binding-registry.txt` resource file enables auto-discovery
+  - **No companion object required** - previously needed `companion object { private val init = KodamaBindingRegistry }`
+  - **No manual imports required** - entity bindings work out of the box
+  - **No `EntitySession.autoBindingProvider` setup required** - fully automatic
+  - Example:
+    ```kotlin
+    // ✅ NO setup required - just use EntitySession!
+    EntitySession(connection).use { session ->
+        val user = session.find<User>(1)  // Works automatically!
+        val order = session.get<UserOrder>(42)  // No boilerplate!
+    }
+    ```
+  - Backward compatible - optional explicit reference still works if preferred for documentation
+  - O(1) binding lookup performance with map-based registry
+  - Handles both interface and implementation class lookups (e.g., `UserImpl` → `User`)
+
 - **Full outer join support for subqueries** - All join types now supported for `.joinAliased()` methods
   - `.joinAliased()` / `.innerJoinAliased()` - INNER JOIN (existing)
   - `.leftJoinAliased()` - LEFT OUTER JOIN (existing)

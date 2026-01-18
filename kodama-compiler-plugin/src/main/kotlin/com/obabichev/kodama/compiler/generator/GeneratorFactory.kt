@@ -39,11 +39,14 @@ import com.obabichev.kodama.compiler.transform.DataTransformer
  */
 class GeneratorFactory(
     private val data: DataTransformer.TransformedData,
-    private val schemaPackage: String,
+    private val schemaPackage: String,  // Kept for backward compatibility, but not used
     private val generatedPackage: String,
     private val relationshipMetadata: com.obabichev.kodama.compiler.RelationshipMetadata? = null,
     private val maxTableCount: Int = 5
 ) {
+
+    // Build map of table name -> package name from table metadata
+    private val tablePackages: Map<String, String> = data.tables.associate { it.capitalizedName to it.packageName }
 
     /**
      * Creates all generators in the appropriate order.
@@ -139,7 +142,7 @@ class GeneratorFactory(
 
         // 3. Generate QueryBuilder_N classes for N=1 to N=maxTableCount
         for (n in 1..maxTableCount) {
-            add(QueryBuilderNGenerator(n, generatedPackage, schemaPackage).forPhantomTypesFile())
+            add(QueryBuilderNGenerator(n, generatedPackage, tablePackages).forPhantomTypesFile())
         }
 
         // 4. Generate SelectContext_N and WhereContext_N for N=1 to N=5
@@ -168,19 +171,21 @@ class GeneratorFactory(
         // 6. Generate table-specific context extensions for each (table, N) pair
         // These provide table accessors in contexts based on phantom type position
         tableNames.forEach { tableName ->
+            val tablePackage = tablePackages[tableName] ?: schemaPackage
             for (n in 1..maxTableCount) {
                 // SelectContext extensions
-                add(TableContextExtensionsGenerator(tableName, n, generatedPackage, schemaPackage).forPhantomTypesFile())
+                add(TableContextExtensionsGenerator(tableName, n, generatedPackage, tablePackage).forPhantomTypesFile())
                 // WhereContext extensions
-                add(TableWhereExtensionsGenerator(tableName, n, generatedPackage, schemaPackage).forPhantomTypesFile())
+                add(TableWhereExtensionsGenerator(tableName, n, generatedPackage, tablePackage).forPhantomTypesFile())
             }
         }
 
         // 6-SELECT. Generate table-specific selectAll() extensions with phantom type constraints
         // These provide COMPILE-TIME safety: you can only selectAll(Table) if that table is in the query
         tableNames.forEach { tableName ->
+            val tablePackage = tablePackages[tableName] ?: schemaPackage
             for (n in 1..maxTableCount) {
-                add(TableSelectAllExtensionsGenerator(tableName, n, generatedPackage, schemaPackage).forPhantomTypesFile())
+                add(TableSelectAllExtensionsGenerator(tableName, n, generatedPackage, tablePackage).forPhantomTypesFile())
             }
         }
 
@@ -192,22 +197,27 @@ class GeneratorFactory(
 
         // 6b. Generate table accessor extensions for OrderBy and GroupBy contexts
         tableNames.forEach { tableName ->
+            val tablePackage = tablePackages[tableName] ?: schemaPackage
             for (n in 1..maxTableCount) {
-                add(TableOrderByExtensionsGenerator(tableName, n, generatedPackage, schemaPackage).forPhantomTypesFile())
-                add(TableGroupByExtensionsGenerator(tableName, n, generatedPackage, schemaPackage).forPhantomTypesFile())
+                add(TableOrderByExtensionsGenerator(tableName, n, generatedPackage, tablePackage).forPhantomTypesFile())
+                add(TableGroupByExtensionsGenerator(tableName, n, generatedPackage, tablePackage).forPhantomTypesFile())
             }
         }
 
         // 7. Generate JoinContext classes for each relationship (from → to)
         // These provide table accessors within join condition lambdas
         relationshipMetadata?.relationships?.forEach { (from, to) ->
-            add(PhantomJoinContextGenerator(from, to, generatedPackage, schemaPackage).forPhantomTypesFile())
+            val fromPackage = tablePackages[from] ?: schemaPackage
+            val toPackage = tablePackages[to] ?: schemaPackage
+            add(PhantomJoinContextGenerator(from, to, generatedPackage, fromPackage, toPackage).forPhantomTypesFile())
         }
 
         // 8. Generate join() extensions for each relationship (from → to) - 1-table queries only
         // These enable QueryBuilder_1 → QueryBuilder_2 transitions
         relationshipMetadata?.relationships?.forEach { (from, to) ->
-            add(PhantomJoinExtensionGenerator(from, to, generatedPackage, schemaPackage).forPhantomTypesFile())
+            val fromPackage = tablePackages[from] ?: schemaPackage
+            val toPackage = tablePackages[to] ?: schemaPackage
+            add(PhantomJoinExtensionGenerator(from, to, generatedPackage, fromPackage, toPackage).forPhantomTypesFile())
         }
 
         // 9. Generate MultiTableJoinContext_N classes for N=2, 3, 4, 5
@@ -220,33 +230,37 @@ class GeneratorFactory(
         // 10. Generate table accessor extensions for MultiTableJoinContext_N
         // These provide position-based table access in multi-table join contexts
         tableNames.forEach { tableName ->
+            val tablePackage = tablePackages[tableName] ?: schemaPackage
             for (n in 2..maxTableCount) {
-                add(MultiTableJoinContextExtensionsGenerator(tableName, n, generatedPackage, schemaPackage).forPhantomTypesFile())
+                add(MultiTableJoinContextExtensionsGenerator(tableName, n, generatedPackage, tablePackage).forPhantomTypesFile())
             }
         }
 
         // 11. Generate multi-table join() extensions for each relationship
         // These enable QueryBuilder_N → QueryBuilder_{N+1} transitions (N >= 2)
         relationshipMetadata?.relationships?.forEach { (from, to) ->
+            val fromPackage = tablePackages[from] ?: schemaPackage
+            val toPackage = tablePackages[to] ?: schemaPackage
             // For QueryBuilder_2 → QueryBuilder_3
             for (position in 1..2) {
-                add(PhantomMultiTableJoinExtensionGenerator(from, to, 2, position, generatedPackage, schemaPackage).forPhantomTypesFile())
+                add(PhantomMultiTableJoinExtensionGenerator(from, to, 2, position, generatedPackage, fromPackage, toPackage).forPhantomTypesFile())
             }
             // For QueryBuilder_3 → QueryBuilder_4
             for (position in 1..3) {
-                add(PhantomMultiTableJoinExtensionGenerator(from, to, 3, position, generatedPackage, schemaPackage).forPhantomTypesFile())
+                add(PhantomMultiTableJoinExtensionGenerator(from, to, 3, position, generatedPackage, fromPackage, toPackage).forPhantomTypesFile())
             }
             // For QueryBuilder_4 → QueryBuilder_5
             for (position in 1..4) {
-                add(PhantomMultiTableJoinExtensionGenerator(from, to, 4, position, generatedPackage, schemaPackage).forPhantomTypesFile())
+                add(PhantomMultiTableJoinExtensionGenerator(from, to, 4, position, generatedPackage, fromPackage, toPackage).forPhantomTypesFile())
             }
         }
 
         // 11. Generate table result accessor extensions for QueryResult_N
         // These provide position-based table access in query results
         tableNames.forEach { tableName ->
+            val tablePackage = tablePackages[tableName] ?: schemaPackage
             for (n in 1..maxTableCount) {
-                add(TableResultExtensionsGenerator(tableName, n, generatedPackage, schemaPackage).forPhantomTypesFile())
+                add(TableResultExtensionsGenerator(tableName, n, generatedPackage, tablePackage).forPhantomTypesFile())
             }
         }
 
@@ -260,11 +274,11 @@ class GeneratorFactory(
         // These provide subquery accessors in SelectContext, WhereContext, and MultiTableJoinContext
         data.subqueries.forEach { subquery ->
             for (n in 1..maxTableCount) {
-                add(SubqueryContextExtensionsGenerator(subquery, n, generatedPackage, schemaPackage).forPhantomTypesFile())
-                add(SubqueryWhereExtensionsGenerator(subquery, n, generatedPackage, schemaPackage).forPhantomTypesFile())
+                add(SubqueryContextExtensionsGenerator(subquery, n, generatedPackage, generatedPackage).forPhantomTypesFile())
+                add(SubqueryWhereExtensionsGenerator(subquery, n, generatedPackage, generatedPackage).forPhantomTypesFile())
                 // MultiTableJoinContext starts at 2 (need at least 2 tables for a join)
                 if (n >= 2) {
-                    add(SubqueryJoinExtensionsGenerator(subquery, n, generatedPackage, schemaPackage).forPhantomTypesFile())
+                    add(SubqueryJoinExtensionsGenerator(subquery, n, generatedPackage, generatedPackage).forPhantomTypesFile())
                 }
             }
         }
@@ -273,7 +287,7 @@ class GeneratorFactory(
         // These provide subquery accessors in QueryResult
         data.subqueries.forEach { subquery ->
             for (n in 1..maxTableCount) {
-                add(SubqueryResultExtensionsGenerator(subquery, n, generatedPackage, schemaPackage).forPhantomTypesFile())
+                add(SubqueryResultExtensionsGenerator(subquery, n, generatedPackage, generatedPackage).forPhantomTypesFile())
             }
         }
 
@@ -338,7 +352,7 @@ class GeneratorFactory(
     private fun createAccessorGenerators(): List<CodeGenerator> = buildList {
         // Table accessors - go to their respective table files
         data.tables.forEach { table ->
-            add(TableAccessorGenerator(table, schemaPackage).forTable(table))
+            add(TableAccessorGenerator(table, table.packageName).forTable(table))
         }
 
         // NOTE: OrderByAccessor and GroupByAccessor classes are generated in TableMetadata.kt

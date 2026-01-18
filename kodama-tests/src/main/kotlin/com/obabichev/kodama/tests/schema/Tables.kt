@@ -7,8 +7,11 @@ import com.obabichev.kodama.schema.nullable
 import com.obabichev.kodama.schema.identity
 import com.obabichev.kodama.tests.entity.User
 import com.obabichev.kodama.tests.entity.UserOrder
+import com.obabichev.kodama.tests.entity.Role
+import com.obabichev.kodama.tests.entity.UserRole
 import com.obabichev.kodama.entity.oneToMany as entityOneToMany
 import com.obabichev.kodama.entity.manyToOne as entityManyToOne
+import com.obabichev.kodama.entity.manyToMany as entityManyToMany
 import com.obabichev.kodama.query.oneToMany
 import com.obabichev.kodama.query.manyToOne
 
@@ -164,11 +167,22 @@ object Users : EntityTable<User>("users") {
     val email = varchar("email", 255)
 
     /**
-     * One-to-many relationship: User has many UserOrders.
-     * Defined in init block to ensure columns are initialized first.
+     * Relationships defined in init block to ensure columns are initialized first.
      */
     init {
+        // One-to-many: User has many UserOrders
         entityOneToMany("orders", UserOrders, UserOrders.userId, this.id)
+
+        // Many-to-many: User has many Roles through UserRoles junction table
+        entityManyToMany(
+            name = "roles",
+            targetTable = Roles,
+            junctionTable = UserRoles,
+            sourceForeignKeyColumn = UserRoles.userId,
+            targetForeignKeyColumn = UserRoles.roleId,
+            sourcePrimaryKeyColumn = this.id,
+            targetPrimaryKeyColumn = Roles.id
+        )
     }
 }
 
@@ -256,4 +270,36 @@ object SmallSerialTest : Table("smallserial_test") {
 object Org : Table("org") {
     val id = integer("id").primaryKey()
     val name = varchar("name", 100)
+}
+
+/**
+ * Roles entity table - for testing many-to-many relationships.
+ */
+object Roles : EntityTable<Role>("roles") {
+    val id = integer("id").primaryKey()
+    val name = varchar("name", 100)
+
+    /**
+     * Many-to-many relationship: Role has many Users through UserRoles junction table.
+     * Defined in init block to ensure columns are initialized first.
+     */
+    init {
+        entityManyToMany(
+            name = "users",
+            targetTable = Users,
+            junctionTable = UserRoles,
+            sourceForeignKeyColumn = UserRoles.roleId,
+            targetForeignKeyColumn = UserRoles.userId,
+            sourcePrimaryKeyColumn = this.id,
+            targetPrimaryKeyColumn = Users.id
+        )
+    }
+}
+
+/**
+ * UserRoles junction table - links Users and Roles for many-to-many relationships.
+ */
+object UserRoles : EntityTable<UserRole>("user_roles") {
+    val userId = integer("user_id")  // FK to Users.id
+    val roleId = integer("role_id")  // FK to Roles.id
 }

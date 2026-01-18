@@ -8,11 +8,18 @@ package com.obabichev.kodama.entity
  * - Inconsistent state (two copies with different values)
  * - Unnecessary database queries (cache hit on second load)
  *
+ * **Memory Management:**
+ * The identity map uses LRU (Least Recently Used) eviction to prevent unbounded memory growth.
+ * When the map exceeds `maxSize`, the least recently accessed entities are automatically evicted.
+ *
+ * Default max size: 10,000 entities
+ * Configure via EntitySession constructor: `EntitySession(connection, maxIdentityMapSize = 50_000)`
+ *
  * Thread safety: NOT thread-safe. Each thread/transaction should have its own EntitySession.
  *
  * Example:
  * ```kotlin
- * val map = IdentityMap()
+ * val map = IdentityMap(maxSize = 1000)
  * val key = EntityKey(User::class, 1)
  * val user = User(1, "Alice")
  *
@@ -21,9 +28,37 @@ package com.obabichev.kodama.entity
  *
  * assert(user === retrieved)  // Same instance!
  * ```
+ *
+ * @param maxSize Maximum number of entities to cache (default: 10,000)
+ * @param onEvict Callback invoked when an entity is evicted (for cleaning up metadata)
  */
-class IdentityMap {
-    private val entities = mutableMapOf<EntityKey, Any>()
+class IdentityMap(
+    private val maxSize: Int = DEFAULT_MAX_SIZE,
+    private val onEvict: ((EntityKey) -> Unit)? = null
+) {
+    companion object {
+        /**
+         * Default maximum number of entities in the identity map.
+         * Configurable per EntitySession instance.
+         */
+        const val DEFAULT_MAX_SIZE = 10_000
+    }
+
+    // LRU cache implementation using LinkedHashMap with access order
+    private val entities = object : LinkedHashMap<EntityKey, Any>(
+        /* initialCapacity */ 16,
+        /* loadFactor */ 0.75f,
+        /* accessOrder */ true  // LRU ordering: true = access order, false = insertion order
+    ) {
+        override fun removeEldestEntry(eldest: Map.Entry<EntityKey, Any>): Boolean {
+            val shouldRemove = size > maxSize
+            if (shouldRemove) {
+                // Notify callback to clean up metadata
+                onEvict?.invoke(eldest.key)
+            }
+            return shouldRemove
+        }
+    }
 
     /**
      * Get an entity from the map.
