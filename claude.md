@@ -557,7 +557,7 @@ Generated code is now placed in `{schemaPackage}.generated` instead of hardcoded
 
 ## Current State
 
-- Version: 0.4.0 (Alpha)
+- Version: 0.5.0 (Alpha)
 - **All tests passing** including:
   - QuerySimpleDataClassTests (8 tests)
   - QueryAggregateTests (3 tests)
@@ -583,7 +583,8 @@ Generated code is now placed in `{schemaPackage}.generated` instead of hardcoded
   - ✅ Nullable column support
   - ✅ Date/Time column types (DATE, TIME, TIMESTAMP, TIMESTAMPTZ, TIMETZ, INTERVAL)
   - ✅ Entity Layer with interface-based entities
-  - ✅ One-to-many and many-to-one relationships
+  - ✅ One-to-many, many-to-one, and many-to-many relationships
+  - ✅ **Zero-boilerplate entity binding auto-discovery** ✅ NEW (v0.5.0) - No manual setup required
   - ✅ Modular code generation architecture (80+ generators)
 - **Code Quality Improvements** (January 2026):
   - ✅ **100% Regex Elimination**: All 43 regex patterns eliminated from code generation
