@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-01-18
+
 ### Added
 
 - **Zero-boilerplate entity binding auto-discovery** - Entity bindings now initialize automatically with no manual setup
