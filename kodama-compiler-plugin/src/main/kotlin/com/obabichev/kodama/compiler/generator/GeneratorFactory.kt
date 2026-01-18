@@ -301,6 +301,14 @@ class GeneratorFactory(
             }
         }
 
+        // 15a. Generate selectAll() methods for subqueries
+        // These allow selecting all columns from a joined subquery: .selectAll(UserTotalSubquery)
+        data.subqueries.forEach { subquery ->
+            for (n in 2..5) {  // Start from 2 since subquery adds a table, up to 5 max tables
+                add(PhantomSubquerySelectAllGenerator(subquery, n, generatedPackage).forPhantomTypesFile())
+            }
+        }
+
         // Note: Query.aliasAs<T>() is provided by SubqueryAliasing.kt in core library
 
         // 16. Generate result accessor classes for subqueries

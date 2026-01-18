@@ -23,18 +23,18 @@ class SimpleSubqueryTest : DatabaseTest() {
 
         withConnection {
             // Inline subquery with fromAliased API
-            val results = fromAliased(UserTotalsNew) {
+            val results = fromAliased(UserTotalSubquery) {
                 from(Order)
                     .selectAs(OrderUserName) { order.userName }
                     .selectAs(MyAlias) { sum(order.cost) }
                     .groupBy { order.userName }
                     .build()
             }
-                .selectAll(UserTotalsNew)
+                .selectAll(UserTotalSubquery)
                 .execute(this)
 
             val data = results.map {
-                it.userTotalsNew.orderUserName to it.userTotalsNew.myAlias
+                it.userTotalSubquery.orderUserName to it.userTotalSubquery.myAlias
             }.toList()
 
             val users = data.map { it.first as? String ?: "" }.toSet()

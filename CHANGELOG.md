@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-01-18
+
+### Fixed
+
+- **Subquery support fully functional** - Fixed critical issues preventing subquery usage
+  - Added missing `selectAll()` method generation for subqueries via `PhantomSubquerySelectAllGenerator`
+  - Fixed selection status parameter tracking in subquery join methods (`joinAliased`, `leftJoinAliased`)
+  - Fixed subquery column names to use snake_case instead of lowercase (e.g., `order_user_name` vs `orderusername`)
+  - Fixed subquery table alias to use snake_case for proper accessor lookup (e.g., `user_total_subquery` vs `usertotalsubquery`)
+  - Fixed `SubqueryRegistry` to require inline subquery definition with `fromAliased()`
+  - All 4 `SimpleSubqueryTest` tests now passing
+  - Example working usage:
+    ```kotlin
+    // Inline subquery with aggregates
+    val results = fromAliased(UserTotalSubquery) {
+        from(Order)
+            .selectAs(OrderUserName) { order.userName }
+            .selectAs(MyAlias) { sum(order.cost) }
+            .groupBy { order.userName }
+            .build()
+    }
+        .selectAll(UserTotalSubquery)
+        .execute(transaction)
+
+    // Join subquery with table
+    from(Person)
+        .joinAliased(
+            from(Order)
+                .selectAs(OrderUserName) { order.userName }
+                .selectAs(MyAlias) { sum(order.cost) }
+                .groupBy { order.userName }
+                .build()
+                .aliasAs<UserTotalSubquery>()
+        ) { person.name eq userTotalSubquery.orderUserName }
+        .selectAll(Person)
+        .selectAll(UserTotalSubquery)
+        .execute(transaction)
+    ```
+
 ## [0.5.0] - 2026-01-18
 
 ### Added
